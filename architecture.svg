@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="784" viewBox="0 0 680 784" role="img" font-family="Helvetica, Arial, sans-serif">
+<title>Request lifecycle of the LLM gateway proxy</title>
+<desc>A vertical pipeline. A client application sends a request that passes through the proxy in order: authenticate key, rate limit, cache lookup, forward via a provider adapter, return to client, and an asynchronous log-and-cost write. Redis backs the cache and rate counters, the provider API is called on a cache miss, PostgreSQL stores the request log, and a dashboard reads aggregated metrics.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1 L8 5 L2 9" fill="none" stroke="#737268" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+
+<rect x="120" y="40" width="220" height="54" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="230" y="64" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Client application</text>
+<text x="230" y="82" text-anchor="middle" font-size="12" fill="#5F5E5A">sends API requests</text>
+
+<rect x="120" y="132" width="220" height="54" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="230" y="156" text-anchor="middle" font-size="14" font-weight="500" fill="#0C447C">1 — Authenticate key</text>
+<text x="230" y="174" text-anchor="middle" font-size="12" fill="#185FA5">reject invalid — 401</text>
+
+<rect x="120" y="224" width="220" height="54" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="230" y="248" text-anchor="middle" font-size="14" font-weight="500" fill="#0C447C">2 — Rate limit</text>
+<text x="230" y="266" text-anchor="middle" font-size="12" fill="#185FA5">reject excess — 429</text>
+
+<rect x="120" y="316" width="220" height="54" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="230" y="340" text-anchor="middle" font-size="14" font-weight="500" fill="#0C447C">3 — Cache lookup</text>
+<text x="230" y="358" text-anchor="middle" font-size="12" fill="#185FA5">hit returns cached</text>
+
+<rect x="120" y="408" width="220" height="54" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="230" y="432" text-anchor="middle" font-size="14" font-weight="500" fill="#0C447C">4 — Forward via adapter</text>
+<text x="230" y="450" text-anchor="middle" font-size="12" fill="#185FA5">miss calls provider</text>
+
+<rect x="120" y="500" width="220" height="54" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="230" y="524" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">5 — Return to client</text>
+<text x="230" y="542" text-anchor="middle" font-size="12" fill="#5F5E5A">stream or full body</text>
+
+<rect x="120" y="592" width="220" height="54" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="230" y="616" text-anchor="middle" font-size="14" font-weight="500" fill="#0C447C">6 — Log and cost</text>
+<text x="230" y="634" text-anchor="middle" font-size="12" fill="#185FA5">asynchronous write</text>
+
+<rect x="430" y="270" width="180" height="54" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="520" y="294" text-anchor="middle" font-size="14" font-weight="500" fill="#085041">Redis</text>
+<text x="520" y="312" text-anchor="middle" font-size="12" fill="#0F6E56">cache and counters</text>
+
+<rect x="430" y="408" width="180" height="54" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="520" y="432" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Provider API</text>
+<text x="520" y="450" text-anchor="middle" font-size="12" fill="#5F5E5A">OpenAI, Anthropic</text>
+
+<rect x="430" y="592" width="180" height="54" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="520" y="616" text-anchor="middle" font-size="14" font-weight="500" fill="#085041">PostgreSQL</text>
+<text x="520" y="634" text-anchor="middle" font-size="12" fill="#0F6E56">request log</text>
+
+<rect x="430" y="690" width="180" height="54" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="520" y="714" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Dashboard</text>
+<text x="520" y="732" text-anchor="middle" font-size="12" fill="#5F5E5A">metrics and charts</text>
+
+<line x1="230" y1="98" x2="230" y2="128" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="230" y1="190" x2="230" y2="220" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="230" y1="282" x2="230" y2="312" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="230" y1="374" x2="230" y2="404" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="230" y1="466" x2="230" y2="496" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="230" y1="558" x2="230" y2="588" stroke="#737268" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+
+<line x1="340" y1="251" x2="426" y2="284" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="340" y1="343" x2="426" y2="312" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<line x1="340" y1="426" x2="426" y2="426" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="426" y1="448" x2="340" y2="448" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<line x1="340" y1="619" x2="426" y2="619" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="520" y1="646" x2="520" y2="686" stroke="#737268" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<rect x="120" y="758" width="12" height="12" rx="2" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="138" y="768" font-size="12" fill="#5F5E5A">Proxy pipeline</text>
+<rect x="258" y="758" width="12" height="12" rx="2" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="276" y="768" font-size="12" fill="#5F5E5A">Data stores</text>
+<rect x="378" y="758" width="12" height="12" rx="2" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="396" y="768" font-size="12" fill="#5F5E5A">External</text>
+</svg>
