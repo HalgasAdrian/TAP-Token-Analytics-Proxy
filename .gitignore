@@ -1,0 +1,49 @@
+# ─── Secrets / environment ───────────────────────────────────────────────
+# Never commit real credentials. Only .env.example (with placeholders) is tracked.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── Python (backend) ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ─── Node / frontend ─────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Docker / data volumes ───────────────────────────────────────────────
+# (Compose named volumes live outside the tree, but ignore any local bind mounts.)
+pgdata/
+redis-data/
+
+# ─── Editors / OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

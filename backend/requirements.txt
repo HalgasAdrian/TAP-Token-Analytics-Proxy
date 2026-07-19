@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+httpx
+sqlalchemy[asyncio]>=2
+asyncpg
+redis>=5
+pydantic-settings
+pydantic
