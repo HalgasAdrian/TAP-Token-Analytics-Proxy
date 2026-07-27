@@ -7,9 +7,10 @@ assignment (A1..A10) is implemented.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -35,7 +36,9 @@ class Settings(BaseSettings):
     logging_enabled: bool = False
 
     # ---- Web / CORS ----
-    cors_origins: list[str] = ["http://localhost:5173"]
+    # NoDecode disables pydantic-settings' JSON pre-parse for this list field so
+    # the comma-separated string from the environment reaches _split_cors_origins.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     log_level: str = "INFO"
 
     @field_validator("cors_origins", mode="before")

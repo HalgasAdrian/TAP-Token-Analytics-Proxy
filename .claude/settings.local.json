@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(./.venv/Scripts/python.exe -m pip install -r backend/requirements.txt)",
-      "PowerShell($docker = \"C:\\\\Users\\\\hidde\\\\AppData\\\\Local\\\\Programs\\\\DockerDesktop\\\\resources\\\\bin\\\\docker.exe\"; $ok=$false; for \\($i=1; $i -le 12; $i++\\) { $v = & $docker info --format '{{.ServerVersion}}' 2>$null; if \\($LASTEXITCODE -eq 0 -and $v\\) { \"Engine READY - server version $v\"; $ok=$true; break }; \"attempt ${i}: engine not ready, waiting 5s...\"; Start-Sleep -Seconds 5 }; if \\(-not $ok\\) { \"ENGINE STILL NOT READY after ~60s\" })"
+      "PowerShell($docker = \"C:\\\\Users\\\\hidde\\\\AppData\\\\Local\\\\Programs\\\\DockerDesktop\\\\resources\\\\bin\\\\docker.exe\"; $ok=$false; for \\($i=1; $i -le 12; $i++\\) { $v = & $docker info --format '{{.ServerVersion}}' 2>$null; if \\($LASTEXITCODE -eq 0 -and $v\\) { \"Engine READY - server version $v\"; $ok=$true; break }; \"attempt ${i}: engine not ready, waiting 5s...\"; Start-Sleep -Seconds 5 }; if \\(-not $ok\\) { \"ENGINE STILL NOT READY after ~60s\" })",
+      "Bash(ls -la C:/Users/hidde/.claude/projects/C--Users-hidde-OneDrive-Documents-GitHub-TAP-Token-Analytics-Proxy/memory)",
+      "Bash(echo \"--- MEMORY.md ---\")",
+      "Bash(cat C:/Users/hidde/.claude/projects/C--Users-hidde-OneDrive-Documents-GitHub-TAP-Token-Analytics-Proxy/memory/MEMORY.md)",
+      "Bash(echo \"\\(no MEMORY.md yet\\)\")"
     ]
   }
 }
