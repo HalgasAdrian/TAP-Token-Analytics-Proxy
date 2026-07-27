@@ -1,7 +1,5 @@
 """SQLAlchemy 2.0 ORM models for TAP (Token Analytics Proxy).
 
-Fully implemented wiring — contains NO assignment stubs.
-
 Security invariant: the Authorization header, API keys, and key material are
 NEVER stored here. Only a SHA-256 `key_hash` is persisted (see ApiKey).
 """
