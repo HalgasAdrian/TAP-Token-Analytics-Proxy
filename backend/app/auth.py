@@ -33,6 +33,7 @@ async def resolve_project(api_key: str, session: AsyncSession) -> Project | None
     #            https://fastapi.tiangolo.com/tutorial/dependencies/
     #            https://fastapi.tiangolo.com/tutorial/security/
     # ============================================================
+    
     raise NotImplementedError("ASSIGNMENT: A1 API key auth")
 
 
