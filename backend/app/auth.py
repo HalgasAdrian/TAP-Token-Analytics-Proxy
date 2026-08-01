@@ -1,9 +1,10 @@
-from base64 import encode
 import hashlib
 import secrets
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models import ApiKey
 
 from app.db import get_session
 from app.models import Project
@@ -19,39 +20,39 @@ def hash_api_key(key: str) -> str:
     return hashed_key
 
 async def resolve_project(api_key: str, session: AsyncSession) -> Project | None:
-    # ============================================================
-    # ASSIGNMENT: A1 API key auth
-    # ------------------------------------------------------------
-    # Implement: generate a random key, hash keys with SHA-256, look up the
-    #            owning Project by key_hash, and enforce a valid key (401 otherwise).
-    # Why:       gates the proxy when AUTH_ENABLED=true and attributes usage to a project.
-    # Done when: with AUTH_ENABLED=true a request with a valid key resolves its Project
-    #            and an invalid/missing key returns HTTP 401.
-    # Reference: https://docs.python.org/3/library/secrets.html
-    #            https://docs.python.org/3/library/hashlib.html
-    #            https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html
-    #            https://fastapi.tiangolo.com/tutorial/dependencies/
-    #            https://fastapi.tiangolo.com/tutorial/security/
-    # ============================================================
-    
-    raise NotImplementedError("ASSIGNMENT: A1 API key auth")
+    key_hash = hash_api_key(api_key)
 
+    statement = select(ApiKey).where(
+        ApiKey.key_hash == key_hash,
+        ApiKey.active == True,
+    )
+    result = await session.execute(statement)
+    api_key_record = result.scalar_one_or_none()
+
+    if api_key_record is None:
+        return None
+
+    statement = select(Project).where(Project.id == api_key_record.project_id)
+    result = await session.execute(statement)
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        return None
+
+    return project
 
 async def require_project(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> Project:
-    # ============================================================
-    # ASSIGNMENT: A1 API key auth
-    # ------------------------------------------------------------
-    # Implement: generate a random key, hash keys with SHA-256, look up the
-    #            owning Project by key_hash, and enforce a valid key (401 otherwise).
-    # Why:       gates the proxy when AUTH_ENABLED=true and attributes usage to a project.
-    # Done when: with AUTH_ENABLED=true a request with a valid key resolves its Project
-    #            and an invalid/missing key returns HTTP 401.
-    # Reference: https://docs.python.org/3/library/secrets.html
-    #            https://docs.python.org/3/library/hashlib.html
-    #            https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html
-    #            https://fastapi.tiangolo.com/tutorial/dependencies/
-    #            https://fastapi.tiangolo.com/tutorial/security/
-    # ============================================================
-    raise NotImplementedError("ASSIGNMENT: A1 API key auth")
+    auth_header = request.headers.get("Authorization")
+    if auth_header is None:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail = "Invalid Authorization header")
+
+    api_key = auth_header.removeprefix("Bearer ")
+    project = await resolve_project(api_key, session)
+    if project is None:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return project

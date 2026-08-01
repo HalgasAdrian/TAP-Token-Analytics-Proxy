@@ -6,7 +6,9 @@
       "Bash(ls -la C:/Users/hidde/.claude/projects/C--Users-hidde-OneDrive-Documents-GitHub-TAP-Token-Analytics-Proxy/memory)",
       "Bash(echo \"--- MEMORY.md ---\")",
       "Bash(cat C:/Users/hidde/.claude/projects/C--Users-hidde-OneDrive-Documents-GitHub-TAP-Token-Analytics-Proxy/memory/MEMORY.md)",
-      "Bash(echo \"\\(no MEMORY.md yet\\)\")"
+      "Bash(echo \"\\(no MEMORY.md yet\\)\")",
+      "Bash(git -C \"C:/Users/hidde/OneDrive/Documents/GitHub/TAP-Token-Analytics-Proxy\" log --oneline -10)",
+      "Bash(git -C \"C:/Users/hidde/OneDrive/Documents/GitHub/TAP-Token-Analytics-Proxy\" status --short)"
     ]
   }
 }
