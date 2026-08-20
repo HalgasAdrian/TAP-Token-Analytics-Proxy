@@ -1,18 +1,142 @@
-export function LatencyChart() {
-  // ============================================================
-  // ASSIGNMENT: A10 chart component
-  // ------------------------------------------------------------
-  // Implement: render this metric with Recharts using its A9 hook, with
-  //            loading / error / empty states (mirror VolumeChart).
-  // Why:       completes the dashboard once the matching A9 hook returns data.
-  // Done when: real data renders as a chart; do NOT call the A9 hook until then.
-  // Reference: https://recharts.org/en-US/examples
-  //            https://tanstack.com/query/latest/docs/framework/react/guides/queries
-  // ============================================================
+import type { ReactElement } from "react";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import type { Bucket } from "../api/client";
+import { useLatency } from "../hooks/useLatency";
+import { AXIS_TICK, VIZ, formatBucket, formatMs } from "../viz/tokens";
+import { MetricCard, PlotArea } from "./MetricCard";
+
+// Median vs tail latency over time. Two distinct series, so this is the one
+// chart on the dashboard using categorical color — blue and orange, the only
+// pair here that shares an axis, validated together for CVD separation.
+//
+// Percentiles rather than a mean: an average hides exactly the tail a caller
+// notices. Both series are on one millisecond axis; never a second y-scale.
+
+/** Labels the final point of a line, so identity is not carried by color alone. */
+function endLabel(text: string, lastIndex: number) {
+  // Recharts types a label renderer as always returning an element, so
+  // non-terminal points render an empty group rather than null.
+  return function EndLabel(props: {
+    x?: number;
+    y?: number;
+    index?: number;
+    value?: number | null;
+  }): ReactElement {
+    const { x, y, index, value } = props;
+    if (index !== lastIndex || value == null || x == null || y == null) {
+      return <g />;
+    }
+    return (
+      <text
+        x={x}
+        y={y}
+        dx={8}
+        dy={4}
+        fill={VIZ.inkSecondary}
+        fontSize={11}
+        fontWeight={600}
+      >
+        {text}
+      </text>
+    );
+  };
+}
+
+export function LatencyChart({ bucket }: { bucket: Bucket }) {
+  const query = useLatency(bucket);
+
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 p-6 text-gray-500">
-      <div className="font-medium">Latency</div>
-      <div className="text-sm">Not yet implemented — A10</div>
-    </div>
+    <MetricCard
+      title="Latency"
+      subtitle={`Median and 95th percentile per ${bucket}`}
+      query={query}
+      isEmpty={(points) => points.length === 0}
+    >
+      {(points) => {
+        const lastIndex = points.length - 1;
+        return (
+          <PlotArea>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={points}
+                margin={{ top: 8, right: 48, bottom: 8, left: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={VIZ.grid}
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="bucket"
+                  tickFormatter={(value) => formatBucket(value, bucket)}
+                  tick={AXIS_TICK}
+                  stroke={VIZ.axis}
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  stroke={VIZ.axis}
+                  tickFormatter={(value: number) => `${Math.round(value)}`}
+                  label={{
+                    value: "ms",
+                    angle: -90,
+                    position: "insideLeft",
+                    style: { fill: VIZ.muted, fontSize: 11 },
+                  }}
+                />
+                <Tooltip
+                  labelFormatter={(value) =>
+                    formatBucket(String(value), bucket)
+                  }
+                  formatter={(value: number, name) => [
+                    formatMs(value),
+                    name === "p50" ? "median" : "p95",
+                  ]}
+                />
+                <Legend
+                  verticalAlign="top"
+                  align="right"
+                  height={28}
+                  iconType="plainline"
+                  formatter={(value) => (
+                    <span style={{ color: VIZ.inkSecondary, fontSize: 12 }}>
+                      {value === "p50" ? "median" : "p95"}
+                    </span>
+                  )}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="p50"
+                  stroke={VIZ.series1}
+                  strokeWidth={2}
+                  dot={{ r: 4, strokeWidth: 0, fill: VIZ.series1 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls
+                  label={endLabel("median", lastIndex)}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="p95"
+                  stroke={VIZ.series2}
+                  strokeWidth={2}
+                  dot={{ r: 4, strokeWidth: 0, fill: VIZ.series2 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls
+                  label={endLabel("p95", lastIndex)}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </PlotArea>
+        );
+      }}
+    </MetricCard>
   );
 }

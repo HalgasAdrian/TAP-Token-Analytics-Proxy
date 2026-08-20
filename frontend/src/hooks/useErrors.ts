@@ -1,12 +1,24 @@
-export function useErrors() {
-  // ============================================================
-  // ASSIGNMENT: A9 metrics query hook
-  // ------------------------------------------------------------
-  // Implement: a TanStack Query hook that fetches this metric from the API
-  //            (mirror useVolume: queryKey + queryFn hitting /metrics/<name>).
-  // Why:       supplies data to the matching A10 chart component.
-  // Done when: the hook returns { data, isLoading, isError } and the chart renders real data.
-  // Reference: https://tanstack.com/query/latest/docs/framework/react/guides/queries
-  // ============================================================
-  throw new Error("ASSIGNMENT: A9 metrics query hook (useErrors)");
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson, metricsPath, type Bucket } from "../api/client";
+
+export interface ErrorBucket {
+  bucket: string;
+  total: number;
+  errors: number;
+  error_rate: number;
+}
+
+// GET /metrics/errors mirrors the cache endpoint: window total plus series.
+export interface ErrorSummary {
+  total: number;
+  errors: number;
+  error_rate: number;
+  series: ErrorBucket[];
+}
+
+export function useErrors(bucket: Bucket = "hour") {
+  return useQuery<ErrorSummary>({
+    queryKey: ["errors", bucket],
+    queryFn: () => fetchJson<ErrorSummary>(metricsPath("errors", bucket)),
+  });
 }

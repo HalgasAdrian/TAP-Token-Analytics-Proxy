@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -8,70 +7,56 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { Bucket } from "../api/client";
 import { useVolume } from "../hooks/useVolume";
+import { AXIS_TICK, VIZ, formatBucket } from "../viz/tokens";
+import { MetricCard, PlotArea } from "./MetricCard";
 
-// Shared card shell so the live chart and the A10 placeholders line up.
-function ChartCard({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-      <div className="mb-4 font-medium text-gray-900">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-// IMPLEMENTED REFERENCE for the A10 chart components.
-// Consumes the useVolume hook and renders request volume over time with
-// Recharts. Note the explicit loading / error / empty states — the A10 charts
-// should mirror this structure once their A9 hooks return data.
-export function VolumeChart() {
-  const { data, isLoading, isError, error } = useVolume();
-
-  if (isLoading) {
-    return (
-      <ChartCard title="Request Volume">
-        <div className="flex h-64 items-center justify-center text-sm text-gray-500">
-          Loading…
-        </div>
-      </ChartCard>
-    );
-  }
-
-  if (isError) {
-    return (
-      <ChartCard title="Request Volume">
-        <div className="flex h-64 items-center justify-center text-sm text-red-600">
-          Failed to load: {error instanceof Error ? error.message : "Unknown error"}
-        </div>
-      </ChartCard>
-    );
-  }
-
-  const points = data ?? [];
-
-  if (points.length === 0) {
-    return (
-      <ChartCard title="Request Volume">
-        <div className="flex h-64 items-center justify-center text-sm text-gray-500">
-          No request data yet.
-        </div>
-      </ChartCard>
-    );
-  }
+// Request count per time bucket. Discrete buckets and a meaningful zero make
+// this a column chart; one series, so no legend — the title names it.
+export function VolumeChart({ bucket }: { bucket: Bucket }) {
+  const query = useVolume(bucket);
 
   return (
-    <ChartCard title="Request Volume">
-      <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={points} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="bucket" tick={{ fontSize: 12 }} stroke="#6b7280" />
-            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="#6b7280" />
-            <Tooltip />
-            <Bar dataKey="count" fill="#2563eb" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </ChartCard>
+    <MetricCard
+      title="Request Volume"
+      subtitle={`Proxied requests per ${bucket}`}
+      query={query}
+      isEmpty={(points) => points.length === 0}
+    >
+      {(points) => (
+        <PlotArea>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={points}
+              margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+            >
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={VIZ.grid}
+                vertical={false}
+              />
+              <XAxis
+                dataKey="bucket"
+                tickFormatter={(value) => formatBucket(value, bucket)}
+                tick={AXIS_TICK}
+                stroke={VIZ.axis}
+              />
+              <YAxis allowDecimals={false} tick={AXIS_TICK} stroke={VIZ.axis} />
+              <Tooltip
+                labelFormatter={(value) => formatBucket(String(value), bucket)}
+                formatter={(value: number) => [value, "requests"]}
+              />
+              <Bar
+                dataKey="count"
+                fill={VIZ.series1}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={48}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </PlotArea>
+      )}
+    </MetricCard>
   );
 }

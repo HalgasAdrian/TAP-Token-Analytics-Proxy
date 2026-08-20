@@ -1,18 +1,78 @@
-export function ErrorRateChart() {
-  // ============================================================
-  // ASSIGNMENT: A10 chart component
-  // ------------------------------------------------------------
-  // Implement: render this metric with Recharts using its A9 hook, with
-  //            loading / error / empty states (mirror VolumeChart).
-  // Why:       completes the dashboard once the matching A9 hook returns data.
-  // Done when: real data renders as a chart; do NOT call the A9 hook until then.
-  // Reference: https://recharts.org/en-US/examples
-  //            https://tanstack.com/query/latest/docs/framework/react/guides/queries
-  // ============================================================
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import type { Bucket } from "../api/client";
+import { useErrors, type ErrorBucket } from "../hooks/useErrors";
+import { AXIS_TICK, VIZ, formatBucket, formatPercent } from "../viz/tokens";
+import { MetricCard, PlotArea } from "./MetricCard";
+
+// Error rate: headline ratio plus per-bucket columns. Columns rather than a
+// line, because errors are usually sparse and isolated spikes — a line through
+// mostly-zero buckets implies a continuity that is not there.
+//
+// Note this counts errors among *admitted* requests. Calls rejected at the auth
+// or rate-limit gate never reach the ledger, so a 429 storm is not in here.
+export function ErrorRateChart({ bucket }: { bucket: Bucket }) {
+  const query = useErrors(bucket);
+
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 p-6 text-gray-500">
-      <div className="font-medium">Error Rate</div>
-      <div className="text-sm">Not yet implemented — A10</div>
-    </div>
+    <MetricCard
+      title="Error Rate"
+      subtitle="Non-2xx responses among forwarded requests"
+      query={query}
+      isEmpty={(summary) => summary.total === 0}
+      headline={(summary) => formatPercent(summary.error_rate)}
+    >
+      {(summary) => (
+        <PlotArea>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={summary.series}
+              margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+            >
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={VIZ.grid}
+                vertical={false}
+              />
+              <XAxis
+                dataKey="bucket"
+                tickFormatter={(value) => formatBucket(value, bucket)}
+                tick={AXIS_TICK}
+                stroke={VIZ.axis}
+              />
+              <YAxis
+                domain={[0, 1]}
+                tickFormatter={formatPercent}
+                tick={AXIS_TICK}
+                stroke={VIZ.axis}
+              />
+              <Tooltip
+                labelFormatter={(value) => formatBucket(String(value), bucket)}
+                formatter={(value: number, _name, item) => {
+                  const row = item?.payload as ErrorBucket | undefined;
+                  const detail = row
+                    ? ` (${row.errors} of ${row.total})`
+                    : "";
+                  return [`${formatPercent(value)}${detail}`, "error rate"];
+                }}
+              />
+              <Bar
+                dataKey="error_rate"
+                fill={VIZ.seriesError}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={48}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </PlotArea>
+      )}
+    </MetricCard>
   );
 }

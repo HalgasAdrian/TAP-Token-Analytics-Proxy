@@ -1,11 +1,11 @@
 # TAP (Token Analytics Proxy) — Setup
 
 TAP is a transparent proxy in front of an LLM provider (OpenAI by default). It forwards
-requests upstream and — once the optional features are turned on — adds auth, caching,
-rate limiting, request logging, and a metrics dashboard.
+requests upstream while adding API-key auth, response caching, per-key rate limiting,
+request logging, cost accounting, and a metrics dashboard.
 
-The base proxy works immediately, before any assignment (A1..A10) is implemented, because
-all four feature flags default to **off**.
+Every feature is behind a flag, and all four default to **off** — so the base
+pass-through proxy runs the moment the stack is up, and each capability is opt-in.
 
 ---
 
@@ -25,17 +25,15 @@ Copy the template and adjust if needed. **Never commit a real `.env`** — only
 cp .env.example .env
 ```
 
-Every variable is documented in `.env.example`. The four feature flags
-(`AUTH_ENABLED`, `CACHE_ENABLED`, `RATE_LIMIT_ENABLED`, `LOGGING_ENABLED`) default to
-`false`, which keeps the base proxy running before any A-assignment is done.
+Every variable is documented in `.env.example`.
 
-Note: TAP does **not** hold an upstream API key. It uses **pass-through auth** — each caller
-sends their own `Authorization` header and TAP relays it upstream unchanged. Keys are never
-logged, cached, or persisted.
+Note: TAP does **not** hold an upstream API key. It uses **pass-through auth** — each
+caller sends their own provider `Authorization` header and TAP relays it upstream
+unchanged. Provider keys are never logged, cached, or persisted.
 
 ---
 
-## 3. Run the backend
+## 3. Run the stack
 
 ```bash
 docker compose up --build
@@ -54,12 +52,16 @@ Verify it is up:
 - Health check: <http://localhost:8000/health> → `{"status": "ok"}`
 - Interactive API docs: <http://localhost:8000/docs>
 
+The Compose file is the **development** orchestration: it mounts `backend/app` and runs
+uvicorn with `--reload`, so edits apply without a rebuild. The image built by
+`backend/Dockerfile` (baked-in source, no reload) is the production artifact.
+
 ---
 
-## 4. Send a request through the proxy (pass-through)
+## 4. Send a request through the proxy
 
-Point any OpenAI SDK (or curl) at TAP's `/v1` base URL and use **your own** OpenAI key.
-This works right away — no assignment needs to be implemented first.
+Point any OpenAI SDK (or curl) at TAP's `/v1` base URL. With `AUTH_ENABLED=false`
+(the default) no TAP key is needed — just your own provider key.
 
 ### Python (OpenAI SDK)
 
@@ -90,12 +92,76 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-TAP forwards the call to `UPSTREAM_BASE_URL` (default `https://api.openai.com`) and returns
-the upstream response verbatim.
+Streaming works the same way — add `"stream": true` and TAP relays the SSE chunks
+incrementally, recording time-to-first-token.
 
 ---
 
-## 5. Run the frontend dashboard
+## 5. Try it without a provider key
+
+A fake OpenAI-compatible upstream ships under Compose's `dev` profile, so the whole
+pipeline can be exercised with no API key and no provider spend:
+
+```bash
+docker compose --profile dev up --build
+```
+
+Then point TAP at it in `.env` and restart the api service:
+
+```
+UPSTREAM_BASE_URL=http://mock-upstream:9000
+```
+
+The mock returns realistic completions with token usage, supports streaming, and has
+two testing hooks: a model prefixed `fail-` returns a 500, and one prefixed `slow-`
+adds latency.
+
+To populate the dashboard immediately, seed synthetic history:
+
+```bash
+docker compose exec api python -m dev.seed --hours 48 --requests 2400 --truncate
+```
+
+---
+
+## 6. Enable the features
+
+Flip the flag in `.env` and restart the api service (`docker compose up -d api`).
+
+| Flag | Adds | Notes |
+|---|---|---|
+| `LOGGING_ENABLED` | one `request_logs` row per forwarded call | Prerequisite for every dashboard metric |
+| `AUTH_ENABLED` | TAP-issued API keys, 401 on an unknown key | Issue a key first — see below |
+| `CACHE_ENABLED` | Redis response cache with TTL | `CACHE_TTL_SECONDS` controls expiry |
+| `RATE_LIMIT_ENABLED` | per-key request budgets, 429 when over | Budget comes from the key's `rate_limit` |
+
+Related settings: `CACHE_TTL_SECONDS`, `DEFAULT_RATE_LIMIT`,
+`RATE_LIMIT_WINDOW_SECONDS`, `UPSTREAM_TIMEOUT_SECONDS`, `CORS_ORIGINS`, `LOG_LEVEL`.
+
+### Issuing API keys
+
+With `AUTH_ENABLED=true`, callers must present a **TAP-issued** key (their provider key
+still rides along to the upstream). Keys are created with the admin CLI:
+
+```bash
+docker compose exec api python -m app.cli create-project --name "My App"
+docker compose exec api python -m app.cli issue-key --project-id 1 --name prod
+```
+
+The plaintext key is printed **once** — only its SHA-256 hash is stored, so it cannot
+be recovered. If it is lost, revoke it and issue another:
+
+```bash
+docker compose exec api python -m app.cli list-projects
+docker compose exec api python -m app.cli list-keys
+docker compose exec api python -m app.cli revoke-key --id 1
+```
+
+Deactivating a project revokes every key it issued.
+
+---
+
+## 7. Run the frontend dashboard
 
 ```bash
 cd frontend
@@ -103,47 +169,32 @@ npm install
 npm run dev
 ```
 
-The dashboard runs on <http://localhost:5173>. If your backend is not on the default
-`http://localhost:8000`, set `VITE_API_BASE` before starting Vite:
+The dashboard runs on <http://localhost:5173> and shows request volume, cost by model,
+latency percentiles, cache hit rate, and error rate, with a granularity selector
+(minute → month). If your backend is not on the default `http://localhost:8000`, set
+`VITE_API_BASE` before starting Vite:
 
 ```bash
 VITE_API_BASE=http://localhost:8000 npm run dev
 ```
 
-Out of the box the dashboard shows the live **Volume** chart plus four
-"Not yet implemented — A10" placeholder cards. The placeholders fill in as you complete the
-frontend assignments.
+Charts read from `/metrics/*`, which requires `LOGGING_ENABLED=true` and at least one
+proxied request (or seeded rows) to show anything.
 
 ---
 
-## 6. Assignment build order (A1..A10)
+## 8. Notes and current limitations
 
-The base proxy runs with every feature flag off. Implement the assignments in roughly this
-order, flipping the matching flag to `true` in `.env` to exercise each one:
-
-| # | File | Flag to enable | What it adds |
-|---|---|---|---|
-| **A1** | `backend/app/auth.py` | `AUTH_ENABLED=true` | API-key generation/hashing + project resolution (401 on bad key) |
-| **A2** | `backend/app/logging_sink.py` | `LOGGING_ENABLED=true` | Persist one `request_logs` row per proxied call |
-| **A3** | `backend/app/providers.py` | — | Extract OpenAI token usage from responses |
-| **A4** | `backend/app/cost.py` | — | Turn token counts into `cost_usd` |
-| **A5** | `backend/app/cache.py` | `CACHE_ENABLED=true` | Redis response cache with TTL |
-| **A6** | `backend/app/rate_limit.py` | `RATE_LIMIT_ENABLED=true` | Per-project rate limiting (429 when over) |
-| **A7** | `backend/app/metrics.py` | — | Aggregate `request_logs` for the `/metrics/*` endpoints |
-| **A8** | `backend/app/proxy.py` | — | Streaming (SSE) passthrough with TTFT |
-| **A9** | `frontend/src/hooks/*` | — | TanStack Query hooks for each metric |
-| **A10** | `frontend/src/components/*` | — | Recharts chart components (replace placeholders) |
-
-A2, A3, A4, and A7 form the logging → metrics pipeline: enable `LOGGING_ENABLED`, implement
-A2/A3/A4 so rows are written with token counts and cost, then A7 + A9 + A10 to surface them
-on the dashboard.
-
-Reminder: never log, cache, or persist the `Authorization` header or any API key material.
-
----
-
-## 7. Notes
-
-- The root `.gitignore` already exists (it ignores `.env`); do not modify it.
-- `create_all` builds the tables on startup for dev convenience. Alembic is the intended
-  production migration path.
+- `create_all` builds the tables on startup for dev convenience. Alembic is the
+  intended production migration path and is not yet wired up.
+- The `/metrics/*` endpoints are **unauthenticated**. That is fine on localhost, but
+  they expose aggregated traffic data — put them behind auth or a private network
+  before exposing TAP publicly.
+- The ledger records *forwarded* traffic. Requests rejected at the auth or rate-limit
+  gate short-circuit before logging, so a 429 storm does not appear in the error-rate
+  metric — deliberate, since a row per rejected request turns a flood into unbounded
+  database growth.
+- The response cache is content-addressed and therefore **shared across projects**: an
+  identical prompt from a different project is a hit. That is what makes it save money;
+  namespace the key by project id in `cache_key` if you need tenant isolation.
+- Never log, cache, or persist the `Authorization` header or any API key material.

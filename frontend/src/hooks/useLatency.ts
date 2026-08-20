@@ -1,12 +1,18 @@
-export function useLatency() {
-  // ============================================================
-  // ASSIGNMENT: A9 metrics query hook
-  // ------------------------------------------------------------
-  // Implement: a TanStack Query hook that fetches this metric from the API
-  //            (mirror useVolume: queryKey + queryFn hitting /metrics/<name>).
-  // Why:       supplies data to the matching A10 chart component.
-  // Done when: the hook returns { data, isLoading, isError } and the chart renders real data.
-  // Reference: https://tanstack.com/query/latest/docs/framework/react/guides/queries
-  // ============================================================
-  throw new Error("ASSIGNMENT: A9 metrics query hook (useLatency)");
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson, metricsPath, type Bucket } from "../api/client";
+
+// One time-bucketed latency point from GET /metrics/latency. Percentiles are
+// null for a bucket with no measurable rows.
+export interface LatencyPoint {
+  bucket: string;
+  p50: number | null;
+  p95: number | null;
+  count: number;
+}
+
+export function useLatency(bucket: Bucket = "hour") {
+  return useQuery<LatencyPoint[]>({
+    queryKey: ["latency", bucket],
+    queryFn: () => fetchJson<LatencyPoint[]>(metricsPath("latency", bucket)),
+  });
 }

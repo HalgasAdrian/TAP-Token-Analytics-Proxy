@@ -69,8 +69,14 @@ The dashboard is derived entirely from the ledger through aggregation. Call volu
 
 ## Running locally
 
-The backend, PostgreSQL, and Redis are orchestrated with Docker Compose; the dashboard runs against the backend's metrics API. Provider credentials and connection settings are supplied through environment variables — see the example environment file. Full setup steps are maintained in the repository.
+The backend, PostgreSQL, and Redis are orchestrated with Docker Compose; the dashboard runs against the backend's metrics API. Provider credentials and connection settings are supplied through environment variables — see the example environment file. A fake OpenAI-compatible upstream ships alongside, so the entire pipeline can be exercised without a provider key or any provider spend. Full setup steps are in [SETUP.md](SETUP.md).
 
-## Project status and future work
+## Project status
 
-The forwarding path, persistence layer, and dashboard constitute the current scope. Planned extensions — in order of priority — are streamed-response support with time-to-first-token accounting, additional provider adapters beyond the OpenAI-compatible surface, token-based rate limiting in addition to request-based limits, and pre-aggregated retention rollups for long-horizon analytics.
+The pipeline described above is implemented end to end: pass-through forwarding, buffered and streamed responses, proxy-issued key authentication, per-key rate limiting, response caching, asynchronous request logging with token and cost accounting, the five aggregation endpoints, and the dashboard that reads them. Every feature sits behind an environment flag and each defaults to off, so the base proxy runs before anything else is turned on.
+
+Known limitations are enumerated at the end of [SETUP.md](SETUP.md). The most significant: the `/metrics/*` endpoints carry no authentication of their own, Alembic is named as the migration path but schema creation still runs through `create_all`, and requests rejected at the auth or rate-limit gate are counted nowhere — the ledger records forwarded traffic only.
+
+## Future work
+
+In order of priority — authentication on the metrics surface and Alembic migrations, both prerequisites for a public deployment; additional provider adapters beyond the OpenAI-compatible surface; token-based rate limiting alongside request-based limits; and pre-aggregated retention rollups for long-horizon analytics.

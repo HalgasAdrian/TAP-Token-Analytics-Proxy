@@ -10,6 +10,17 @@
 export const API_BASE: string =
   import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
+/** Time granularities the /metrics endpoints accept for `bucket`. */
+export type Bucket = "minute" | "hour" | "day" | "week" | "month";
+
+export const BUCKETS: readonly Bucket[] = [
+  "minute",
+  "hour",
+  "day",
+  "week",
+  "month",
+];
+
 export async function fetchJson<T = unknown>(path: string): Promise<T> {
   const url = `${API_BASE}${path}`;
   const response = await fetch(url, {
@@ -23,4 +34,9 @@ export async function fetchJson<T = unknown>(path: string): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+/** Build a /metrics path carrying a bucket granularity. */
+export function metricsPath(name: string, bucket: Bucket): string {
+  return `/metrics/${name}?bucket=${encodeURIComponent(bucket)}`;
 }

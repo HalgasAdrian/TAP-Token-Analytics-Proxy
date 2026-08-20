@@ -1,12 +1,27 @@
-export function useCache() {
-  // ============================================================
-  // ASSIGNMENT: A9 metrics query hook
-  // ------------------------------------------------------------
-  // Implement: a TanStack Query hook that fetches this metric from the API
-  //            (mirror useVolume: queryKey + queryFn hitting /metrics/<name>).
-  // Why:       supplies data to the matching A10 chart component.
-  // Done when: the hook returns { data, isLoading, isError } and the chart renders real data.
-  // Reference: https://tanstack.com/query/latest/docs/framework/react/guides/queries
-  // ============================================================
-  throw new Error("ASSIGNMENT: A9 metrics query hook (useCache)");
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson, metricsPath, type Bucket } from "../api/client";
+
+export interface CacheBucket {
+  bucket: string;
+  total: number;
+  hits: number;
+  misses: number;
+  hit_rate: number;
+}
+
+// GET /metrics/cache returns the window total alongside its per-bucket series,
+// so the headline figure and the trend always agree.
+export interface CacheSummary {
+  total: number;
+  hits: number;
+  misses: number;
+  hit_rate: number;
+  series: CacheBucket[];
+}
+
+export function useCache(bucket: Bucket = "hour") {
+  return useQuery<CacheSummary>({
+    queryKey: ["cache", bucket],
+    queryFn: () => fetchJson<CacheSummary>(metricsPath("cache", bucket)),
+  });
 }

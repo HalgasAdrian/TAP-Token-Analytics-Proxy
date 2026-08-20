@@ -6,6 +6,20 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    # Dev orchestration: the source is mounted and uvicorn reloads on change.
+    # The Dockerfile's baked-in COPY + plain uvicorn is the production artifact.
+    volumes:
+      - ./backend/app:/app/app
+      # Dev-only tooling (seed script); not baked into the production image.
+      - ./backend/dev:/app/dev
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,6 +47,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Fake OpenAI-compatible provider for local demos and tests — no API key, no
+  # provider spend. Opt in with `docker compose --profile dev up` and set
+  # UPSTREAM_BASE_URL=http://mock-upstream:9000 in .env.
+  mock-upstream:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./backend/dev:/app/dev
+    command:
+      - uvicorn
+      - dev.mock_upstream:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9000"
 
 volumes:
   postgres_data:

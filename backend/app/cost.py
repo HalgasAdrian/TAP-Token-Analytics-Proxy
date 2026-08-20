@@ -20,16 +20,38 @@ PRICING: dict[str, dict[str, float]] = {
 }
 
 
+TOKENS_PER_PRICE_UNIT = 1_000_000
+
+
+def lookup_pricing(model: str) -> dict[str, float] | None:
+    """Return the input/output rates for `model`, or None if it is unpriced.
+
+    Providers return dated model ids (`gpt-4o-mini-2024-07-18`) that will never
+    match a PRICING key exactly, so an exact miss falls back to the longest
+    PRICING key that prefixes the model. Longest-match matters: `gpt-4o-mini-…`
+    must resolve to `gpt-4o-mini`, not to `gpt-4o`.
+    """
+    if not model:
+        return None
+    if model in PRICING:
+        return PRICING[model]
+
+    prefixes = [key for key in PRICING if model.startswith(key)]
+    if not prefixes:
+        return None
+    return PRICING[max(prefixes, key=len)]
+
+
 def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    # ============================================================
-    # ASSIGNMENT: A4 compute cost
-    # ------------------------------------------------------------
-    # Implement: look up per-token pricing for `model` in PRICING and return the total
-    #            USD cost for the given input/output token counts.
-    # Why:       turns raw token counts into the cost_usd stored per request and charted.
-    # Done when: gpt-4o-mini with known token counts returns the expected USD value and
-    #            an unknown model is handled without crashing.
-    # Reference: https://platform.openai.com/docs/pricing
-    #            https://docs.python.org/3/library/functions.html#float
-    # ============================================================
-    raise NotImplementedError("ASSIGNMENT: A4 compute cost")
+    """Return the USD cost of a call, or 0.0 when the model has no known price.
+
+    An unpriced model is not an error — TAP proxies arbitrary OpenAI-compatible
+    upstreams, so it records the call at zero cost rather than dropping it.
+    """
+    pricing = lookup_pricing(model)
+    if pricing is None:
+        return 0.0
+
+    billed_input = max(0, input_tokens) * pricing["input"]
+    billed_output = max(0, output_tokens) * pricing["output"]
+    return (billed_input + billed_output) / TOKENS_PER_PRICE_UNIT
