@@ -1,7 +1,7 @@
 """Application configuration via pydantic-settings.
 
-All feature flags default to False so the base proxy runs before any
-assignment (A1..A10) is implemented.
+All feature flags default to False, so the base pass-through proxy runs with no
+further setup.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     upstream_base_url: str = "https://api.openai.com"
     upstream_timeout_seconds: float = 60.0
 
-    # ---- Feature flags (all default OFF) ----
+    # ---- Feature flags ----
     auth_enabled: bool = False
     cache_enabled: bool = False
     cache_ttl_seconds: int = 3600
@@ -35,9 +35,22 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     logging_enabled: bool = False
 
+    # ---- Ledger growth ----
+    # Request and response bodies dominate storage. A body whose JSON exceeds
+    # this many bytes is replaced with a size marker; 0 disables the cap.
+    max_body_bytes: int = 16384
+    # Age at which `prune-logs` deletes rows; 0 means keep everything.
+    log_retention_days: int = 30
+
+    # ---- Dashboard and metrics access ----
+    # Bearer token for programmatic access to /metrics.
+    metrics_token: str = ""
+    # HTTP Basic password guarding the dashboard and /metrics in a browser.
+    dashboard_password: str = ""
+
     # ---- Web / CORS ----
-    # NoDecode disables pydantic-settings' JSON pre-parse for this list field so
-    # the comma-separated string from the environment reaches _split_cors_origins.
+    # NoDecode skips the JSON pre-parse, so the comma-separated environment
+    # value reaches _split_cors_origins.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     log_level: str = "INFO"
 

@@ -6,9 +6,8 @@ import { LatencyChart } from "./components/LatencyChart";
 import { CacheChart } from "./components/CacheChart";
 import { ErrorRateChart } from "./components/ErrorRateChart";
 
-// Dashboard shell. Granularity is held here and passed to every time-bucketed
-// chart, so the whole board reads at one scale — a single filter row above the
-// charts rather than a control per card.
+// Granularity lives here so the whole board reads at one scale, rather than
+// each card carrying its own control.
 export default function App() {
   const [bucket, setBucket] = useState<Bucket>("hour");
 

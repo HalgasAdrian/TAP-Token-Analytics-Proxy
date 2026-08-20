@@ -1,18 +1,13 @@
-"""A fake OpenAI-compatible upstream, for local development and tests.
+"""A fake OpenAI-compatible upstream for local development and tests.
 
-Point TAP at this instead of api.openai.com to exercise the whole pipeline —
-logging, cost, caching, rate limiting, metrics, streaming — with no API key and
-no provider spend:
+Point TAP at it to exercise the whole pipeline with no API key and no provider
+spend: UPSTREAM_BASE_URL=http://mock-upstream:9000
 
-    UPSTREAM_BASE_URL=http://mock-upstream:9000
+Runs only under Compose's `dev` profile; it is not part of the application
+package or the production image.
 
-It is deliberately NOT part of the application package (`backend/app`), is not
-baked into the production image, and runs only under Compose's `dev` profile.
-
-Behaviour hooks for testing:
-  * model prefixed ``fail-``  -> responds 500 with an OpenAI-shaped error body
-  * model prefixed ``slow-``  -> adds MOCK_SLOW_MS of latency
-  * ``stream: true``          -> emits an SSE stream ending with a usage chunk
+Testing hooks: a model prefixed `fail-` returns 500, one prefixed `slow-` adds
+latency, and `stream: true` emits SSE ending with a usage chunk.
 """
 
 from __future__ import annotations
@@ -23,15 +18,14 @@ import os
 import random
 import time
 import uuid
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI(title="Mock OpenAI-compatible upstream")
 
-# Baseline synthetic latency, so latency percentiles have a distribution to
-# report rather than a single spike.
+# Jitter gives latency percentiles a distribution rather than a single spike.
 MOCK_BASE_MS = float(os.getenv("MOCK_BASE_MS", "40"))
 MOCK_JITTER_MS = float(os.getenv("MOCK_JITTER_MS", "120"))
 MOCK_SLOW_MS = float(os.getenv("MOCK_SLOW_MS", "900"))
@@ -120,7 +114,7 @@ async def chat_completions(request: Request) -> object:
 async def _stream_chunks(
     completion_id: str, created: int, model: str, prompt_tokens: int
 ) -> AsyncIterator[str]:
-    """Emit an OpenAI-shaped SSE stream, usage last (as stream_options does)."""
+    """Emit an OpenAI-shaped SSE stream with usage last."""
 
     def envelope(delta: dict, finish_reason: str | None = None) -> str:
         chunk = {
@@ -128,9 +122,7 @@ async def _stream_chunks(
             "object": "chat.completion.chunk",
             "created": created,
             "model": model,
-            "choices": [
-                {"index": 0, "delta": delta, "finish_reason": finish_reason}
-            ],
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
         }
         return f"data: {json.dumps(chunk)}\n\n"
 

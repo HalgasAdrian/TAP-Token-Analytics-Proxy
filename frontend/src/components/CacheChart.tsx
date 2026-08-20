@@ -12,9 +12,6 @@ import { useCache, type CacheBucket } from "../hooks/useCache";
 import { AXIS_TICK, VIZ, formatBucket, formatPercent } from "../viz/tokens";
 import { MetricCard, PlotArea } from "./MetricCard";
 
-// Cache hit rate: one headline ratio plus its trend. The window total is the
-// number worth reading, so it leads as a stat figure; the area beneath shows
-// whether it is improving. Single series — no legend needed.
 export function CacheChart({ bucket }: { bucket: Bucket }) {
   const query = useCache(bucket);
 
@@ -58,8 +55,7 @@ export function CacheChart({ bucket }: { bucket: Bucket }) {
                 tick={AXIS_TICK}
                 stroke={VIZ.axis}
               />
-              {/* Fixed 0–1 domain: a rate chart that autoscales makes a 2%
-                  hit rate look like a full one. */}
+              {/* Fixed domain: autoscaling makes a 2% rate look like a full one. */}
               <YAxis
                 domain={[0, 1]}
                 tickFormatter={formatPercent}

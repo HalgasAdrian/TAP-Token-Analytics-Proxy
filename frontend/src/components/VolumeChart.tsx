@@ -12,8 +12,6 @@ import { useVolume } from "../hooks/useVolume";
 import { AXIS_TICK, VIZ, formatBucket } from "../viz/tokens";
 import { MetricCard, PlotArea } from "./MetricCard";
 
-// Request count per time bucket. Discrete buckets and a meaningful zero make
-// this a column chart; one series, so no legend — the title names it.
 export function VolumeChart({ bucket }: { bucket: Bucket }) {
   const query = useVolume(bucket);
 

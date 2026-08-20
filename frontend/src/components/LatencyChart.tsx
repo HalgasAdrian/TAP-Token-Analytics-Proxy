@@ -14,17 +14,13 @@ import { useLatency } from "../hooks/useLatency";
 import { AXIS_TICK, VIZ, formatBucket, formatMs } from "../viz/tokens";
 import { MetricCard, PlotArea } from "./MetricCard";
 
-// Median vs tail latency over time. Two distinct series, so this is the one
-// chart on the dashboard using categorical color — blue and orange, the only
-// pair here that shares an axis, validated together for CVD separation.
-//
-// Percentiles rather than a mean: an average hides exactly the tail a caller
-// notices. Both series are on one millisecond axis; never a second y-scale.
+// The only chart with two series, and so the only one using categorical color.
+// Both share one millisecond axis.
 
 /** Labels the final point of a line, so identity is not carried by color alone. */
 function endLabel(text: string, lastIndex: number) {
-  // Recharts types a label renderer as always returning an element, so
-  // non-terminal points render an empty group rather than null.
+  // Recharts types a label renderer as always returning an element, hence the
+  // empty group rather than null.
   return function EndLabel(props: {
     x?: number;
     y?: number;

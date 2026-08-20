@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson, metricsPath, type Bucket } from "../api/client";
 
-// One time-bucketed latency point from GET /metrics/latency. Percentiles are
-// null for a bucket with no measurable rows.
+// Percentiles are null for a bucket with no measurable rows.
 export interface LatencyPoint {
   bucket: string;
   p50: number | null;

@@ -1,15 +1,12 @@
 """Admin CLI for provisioning projects and API keys.
 
-Run it inside the api container:
-
     docker compose exec api python -m app.cli create-project --name "My App"
     docker compose exec api python -m app.cli issue-key --project-id 1 --name prod
     docker compose exec api python -m app.cli list-keys
     docker compose exec api python -m app.cli revoke-key --id 1
 
-Security invariant: a generated key is printed exactly once, at issue time, and
-only its SHA-256 hash is stored. There is no way to recover it afterwards — if
-it is lost, revoke it and issue another.
+A generated key is printed once, at issue time; only its hash is stored. If it
+is lost, revoke it and issue another.
 """
 
 from __future__ import annotations
@@ -21,8 +18,9 @@ from sqlalchemy import select
 
 from app.auth import generate_api_key, hash_api_key
 from app.config import settings
-from app.db import AsyncSessionLocal, init_db
+from app.db import AsyncSessionLocal
 from app.models import ApiKey, Project
+from app.retention import prune_request_logs
 
 
 async def create_project(name: str) -> None:
@@ -46,9 +44,7 @@ async def issue_key(project_id: int, name: str, rate_limit: int | None) -> None:
             name=name,
             key_hash=hash_api_key(plaintext),
             rate_limit=(
-                rate_limit
-                if rate_limit is not None
-                else settings.default_rate_limit
+                rate_limit if rate_limit is not None else settings.default_rate_limit
             ),
         )
         session.add(record)
@@ -56,8 +52,10 @@ async def issue_key(project_id: int, name: str, rate_limit: int | None) -> None:
         await session.refresh(record)
 
         print(f"issued key id={record.id} for project {project.name!r}")
-        print(f"  rate limit: {record.rate_limit} requests / "
-              f"{settings.rate_limit_window_seconds}s")
+        print(
+            f"  rate limit: {record.rate_limit} requests / "
+            f"{settings.rate_limit_window_seconds}s"
+        )
         print()
         print("  Copy this now — it is not recoverable:")
         print(f"    {plaintext}")
@@ -92,9 +90,19 @@ async def list_keys(project_id: int | None) -> None:
     print("id\tproject\tname\tlimit\tstate")
     for key in keys:
         state = "active" if key.active else "revoked"
-        print(
-            f"{key.id}\t{key.project_id}\t{key.name}\t{key.rate_limit}\t{state}"
+        print(f"{key.id}\t{key.project_id}\t{key.name}\t{key.rate_limit}\t{state}")
+
+
+async def prune_logs(days: int | None, dry_run: bool) -> None:
+    retention = days if days is not None else settings.log_retention_days
+    if retention <= 0:
+        raise SystemExit(
+            "retention is disabled (LOG_RETENTION_DAYS=0); pass --days to override"
         )
+
+    deleted, cutoff = await prune_request_logs(retention, dry_run=dry_run)
+    verb = "would delete" if dry_run else "deleted"
+    print(f"{verb} {deleted} rows older than {cutoff:%Y-%m-%d %H:%M} UTC")
 
 
 async def revoke_key(key_id: int) -> None:
@@ -132,14 +140,23 @@ def build_parser() -> argparse.ArgumentParser:
     revoke = subcommands.add_parser("revoke-key", help="deactivate a key")
     revoke.add_argument("--id", type=int, required=True, dest="key_id")
 
+    prune = subcommands.add_parser(
+        "prune-logs", help="delete request_logs past the retention window"
+    )
+    prune.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help=f"retention in days (default {settings.log_retention_days})",
+    )
+    prune.add_argument(
+        "--dry-run", action="store_true", help="report what would be deleted"
+    )
+
     return parser
 
 
 async def dispatch(args: argparse.Namespace) -> None:
-    # The CLI may run before the API has ever started (or against a fresh
-    # volume), so ensure the schema exists first.
-    await init_db()
-
     if args.command == "create-project":
         await create_project(args.name)
     elif args.command == "issue-key":
@@ -150,6 +167,8 @@ async def dispatch(args: argparse.Namespace) -> None:
         await list_keys(args.project_id)
     elif args.command == "revoke-key":
         await revoke_key(args.key_id)
+    elif args.command == "prune-logs":
+        await prune_logs(args.days, args.dry_run)
 
 
 def main() -> None:

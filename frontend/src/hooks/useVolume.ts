@@ -1,15 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson, metricsPath, type Bucket } from "../api/client";
 
-// One time-bucketed request-volume point returned by GET /metrics/volume.
 export interface VolumePoint {
   bucket: string;
   count: number;
 }
 
-// The shape every metrics hook here follows: a queryKey that includes each
-// input affecting the result (so changing granularity refetches rather than
-// serving a stale cache entry) plus a queryFn hitting one /metrics endpoint.
+// The bucket belongs in the queryKey so changing granularity refetches rather
+// than serving a stale entry. Every hook here follows that shape.
 export function useVolume(bucket: Bucket = "hour") {
   return useQuery<VolumePoint[]>({
     queryKey: ["volume", bucket],

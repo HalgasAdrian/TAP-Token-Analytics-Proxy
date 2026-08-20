@@ -1,13 +1,12 @@
-"""Seed `request_logs` with synthetic traffic, for demos and for working on the
-metrics queries without first generating real load.
+"""Seed request_logs with synthetic traffic, for demos and for working on the
+metrics queries without generating real load.
 
     docker compose exec api python -m dev.seed --hours 48 --requests 2000
 
-Run it as a module (`-m`), not as a path: `python dev/seed.py` would put
-`/app/dev` on sys.path instead of `/app`, and the `app` imports below would fail.
+Run as a module, not a path: `python dev/seed.py` would put `/app/dev` on
+sys.path instead of `/app`, and the `app` imports below would fail.
 
-Writes only to the ledger — it does not touch projects or api_keys. Pass
---truncate to clear existing rows first.
+Writes only to the ledger. Pass --truncate to clear existing rows first.
 """
 
 from __future__ import annotations
@@ -15,12 +14,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete
 
 from app.cost import compute_cost
-from app.db import AsyncSessionLocal, init_db
+from app.db import AsyncSessionLocal
 from app.models import RequestLog
-from sqlalchemy import delete
 
 # Traffic mix, roughly what a small app sends: mostly the cheap model.
 _MODEL_WEIGHTS = {
@@ -138,9 +138,7 @@ def _make_row(created_at: datetime) -> RequestLog:
 
 
 async def seed(hours: int, requests: int, truncate: bool) -> None:
-    await init_db()
-
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_start = now - timedelta(hours=hours)
 
     # Distribute timestamps across the window, weighted by hour of day.
@@ -156,9 +154,7 @@ async def seed(hours: int, requests: int, truncate: bool) -> None:
         count = max(1, round(requests * share))
         hour_start = window_start + timedelta(hours=offset)
         for _ in range(count):
-            created_at = hour_start + timedelta(
-                seconds=random.uniform(0, 3600)
-            )
+            created_at = hour_start + timedelta(seconds=random.uniform(0, 3600))
             if created_at > now:
                 continue
             rows.append(_make_row(created_at))

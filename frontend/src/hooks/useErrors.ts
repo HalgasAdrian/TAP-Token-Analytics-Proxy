@@ -8,7 +8,6 @@ export interface ErrorBucket {
   error_rate: number;
 }
 
-// GET /metrics/errors mirrors the cache endpoint: window total plus series.
 export interface ErrorSummary {
   total: number;
   errors: number;

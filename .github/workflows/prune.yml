@@ -1,0 +1,42 @@
+name: Prune ledger
+
+# Retention is enforced on a schedule rather than in the request path, so the
+# proxy never pays for it. LOG_RETENTION_DAYS on the app decides the window.
+on:
+  schedule:
+    - cron: "17 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would be deleted without deleting"
+        type: boolean
+        default: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether Fly is configured
+        id: fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -n "$FLY_API_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "FLY_API_TOKEN is not set; nothing to prune"
+          fi
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.fly.outputs.ready == 'true'
+
+      - name: Prune
+        if: steps.fly.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          flags=""
+          if [ "$DRY_RUN" = "true" ]; then flags="--dry-run"; fi
+          flyctl ssh console --command "python -m app.cli prune-logs $flags"

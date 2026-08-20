@@ -9,8 +9,7 @@ export interface CacheBucket {
   hit_rate: number;
 }
 
-// GET /metrics/cache returns the window total alongside its per-bucket series,
-// so the headline figure and the trend always agree.
+// Window total plus series, so the headline figure and the trend always agree.
 export interface CacheSummary {
   total: number;
   hits: number;

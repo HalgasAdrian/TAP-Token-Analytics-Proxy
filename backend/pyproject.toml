@@ -1,0 +1,28 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+# Put the project root on sys.path so `app` and `dev` import; pytest would
+# otherwise only add the tests directory.
+pythonpath = ["."]
+# One event loop for the whole session: app.db.engine and the Redis client are
+# module-level singletons, and a pool built on one loop cannot be reused on
+# another.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Calling these in argument defaults is how FastAPI declares dependencies and
+# query params; B008 would flag every route.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest must set environment variables before importing application modules.
+"tests/conftest.py" = ["E402"]

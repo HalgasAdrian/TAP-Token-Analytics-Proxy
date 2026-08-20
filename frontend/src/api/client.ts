@@ -1,16 +1,12 @@
-// Small typed API client for the TAP dashboard.
-//
-// API_BASE is read from the Vite env (VITE_API_BASE); it falls back to the
-// local backend default. fetchJson is a thin wrapper around fetch that throws
-// on any non-2xx response so TanStack Query can surface an error state.
-//
-// SECURITY: this client never sends or stores Authorization headers or API
-// keys. The dashboard only reads aggregated, non-sensitive /metrics data.
+// Typed API client for the dashboard. It reads aggregated /metrics data only,
+// and never sends or stores an Authorization header.
 
-export const API_BASE: string =
-  import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+// Empty means same origin: in production the API serves this bundle, and in
+// development Vite proxies /v1 and /metrics to it. Either way there is no
+// cross-origin request and no URL baked into the build. Set VITE_API_BASE only
+// to point the dashboard at a different host.
+export const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
-/** Time granularities the /metrics endpoints accept for `bucket`. */
 export type Bucket = "minute" | "hour" | "day" | "week" | "month";
 
 export const BUCKETS: readonly Bucket[] = [
@@ -21,6 +17,7 @@ export const BUCKETS: readonly Bucket[] = [
   "month",
 ];
 
+/** Throws on any non-2xx so TanStack Query surfaces an error state. */
 export async function fetchJson<T = unknown>(path: string): Promise<T> {
   const url = `${API_BASE}${path}`;
   const response = await fetch(url, {
@@ -36,7 +33,6 @@ export async function fetchJson<T = unknown>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** Build a /metrics path carrying a bucket granularity. */
 export function metricsPath(name: string, bucket: Bucket): string {
   return `/metrics/${name}?bucket=${encodeURIComponent(bucket)}`;
 }

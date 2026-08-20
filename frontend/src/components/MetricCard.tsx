@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 
-// The shell every chart on the dashboard shares, plus its loading / error /
-// empty states. Centralising them keeps the five cards visually identical and
-// means a chart body only ever renders the case where data exists.
+// The shell every chart shares, plus its loading, error, and empty states, so a
+// chart body only renders the case where data exists.
 
 const PANEL_HEIGHT = "h-64";
 
@@ -23,14 +22,10 @@ export interface QueryLike<T> {
 
 interface MetricCardProps<T> {
   title: string;
-  /** One line on what the metric means; sits under the title. */
   subtitle?: string;
   query: QueryLike<T>;
-  /** True when the request succeeded but there is nothing to plot. */
   isEmpty: (data: T) => boolean;
-  /** Optional headline figure — the stat-tile value for ratio metrics. */
   headline?: (data: T) => ReactNode;
-  /** Rendered only once data is present and non-empty. */
   children: (data: T) => ReactNode;
 }
 
@@ -80,7 +75,6 @@ export function MetricCard<T>({
             <div className="mt-0.5 text-xs text-gray-500">{subtitle}</div>
           )}
         </div>
-        {/* Headline figures wear an ink token, never a series color. */}
         {showHeadline && (
           <div className="text-2xl leading-none text-gray-900">
             {headline(data)}
@@ -92,7 +86,7 @@ export function MetricCard<T>({
   );
 }
 
-/** Fixed-height wrapper so every plot area lines up across cards. */
+/** Fixed height so every plot area lines up across cards. */
 export function PlotArea({ children }: { children: ReactNode }) {
   return <div className={PANEL_HEIGHT}>{children}</div>;
 }
