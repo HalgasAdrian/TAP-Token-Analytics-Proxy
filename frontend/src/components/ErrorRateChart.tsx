@@ -12,12 +12,8 @@ import { useErrors, type ErrorBucket } from "../hooks/useErrors";
 import { AXIS_TICK, VIZ, formatBucket, formatPercent } from "../viz/tokens";
 import { MetricCard, PlotArea } from "./MetricCard";
 
-// Error rate: headline ratio plus per-bucket columns. Columns rather than a
-// line, because errors are usually sparse and isolated spikes — a line through
-// mostly-zero buckets implies a continuity that is not there.
-//
-// Note this counts errors among *admitted* requests. Calls rejected at the auth
-// or rate-limit gate never reach the ledger, so a 429 storm is not in here.
+// Columns, not a line: errors are sparse spikes, and a line through mostly-zero
+// buckets implies a continuity that is not there.
 export function ErrorRateChart({ bucket }: { bucket: Bucket }) {
   const query = useErrors(bucket);
 

@@ -183,13 +183,99 @@ proxied request (or seeded rows) to show anything.
 
 ---
 
-## 8. Notes and current limitations
+## 8. Tests
 
-- `create_all` builds the tables on startup for dev convenience. Alembic is the
-  intended production migration path and is not yet wired up.
-- The `/metrics/*` endpoints are **unauthenticated**. That is fine on localhost, but
-  they expose aggregated traffic data — put them behind auth or a private network
-  before exposing TAP publicly.
+```bash
+docker compose exec api pytest
+docker compose exec api ruff check .
+```
+
+The suite runs against a real Postgres and Redis — the metrics queries depend on
+`date_trunc`, `percentile_cont`, and JSONB — using a dedicated `tap_test` database and
+Redis index 1, so a run cannot touch development data. It creates that database itself
+on first use.
+
+Three tiers: pure unit tests for cost, usage extraction, cache keys, and the SSE
+watcher; integration tests for auth, the limiter, the cache, and the five aggregations;
+and end-to-end tests that drive the whole proxy with the mock provider mounted as an
+ASGI app, so no socket or provider is involved.
+
+CI runs the same suite plus `ruff`, the frontend typecheck and build, and both Docker
+image builds on every push and pull request.
+
+---
+
+## 9. Deploying
+
+The production image serves the API **and** the built dashboard from one origin, so
+there is one thing to deploy, no CORS, and no API URL baked into the bundle.
+
+Managed Postgres and Redis are used rather than self-hosted containers, so the app
+owns no volume and holds no state — it can scale to zero without losing anything.
+
+### Schema changes
+
+Alembic owns the schema. `create_all` is gone: it never alters an existing table and
+races when several instances start at once.
+
+```bash
+docker compose exec api alembic upgrade head        # applied automatically on boot
+docker compose exec api alembic revision --autogenerate -m "describe the change"
+```
+
+A test asserts the models and migrations have not drifted, so forgetting to generate a
+revision fails CI rather than production.
+
+### Provisioning
+
+1. **Postgres** — create a project on [Neon](https://neon.com). Take the connection
+   string and convert the scheme to `postgresql+asyncpg://`, keeping `?ssl=require`.
+2. **Redis** — create a database on [Upstash](https://upstash.com). Use its `rediss://`
+   URL. Only the cache and rate-limit counters live here, so losing it is survivable.
+3. **Fly** — `fly launch --no-deploy` (the committed `fly.toml` already has the
+   config), then set the secrets:
+
+```bash
+fly secrets set \
+  DATABASE_URL="postgresql+asyncpg://...neon.tech/tap?ssl=require" \
+  REDIS_URL="rediss://...upstash.io:6379" \
+  DASHBOARD_PASSWORD="$(openssl rand -base64 24)" \
+  METRICS_TOKEN="$(openssl rand -hex 32)"
+fly deploy
+```
+
+`release_command` runs `alembic upgrade head` once per deploy, before the new machines
+take traffic.
+
+### Access
+
+The dashboard and `/metrics` are gated by `app/access.py`. `DASHBOARD_PASSWORD` works
+over HTTP Basic, which is what lets a browser authenticate without a secret inside the
+bundle; `METRICS_TOKEN` is a bearer token for scripts. `/v1/*` is unaffected — it has
+its own API-key auth — and `/health` stays public for the platform probe.
+
+With neither set, the dashboard and metrics are open and startup logs a warning.
+
+### Cost
+
+Roughly **$3–15/month**: one `shared-cpu-1x` 512MB machine at $3.32, Neon and Upstash
+on their free or usage-based tiers. `auto_stop_machines = "suspend"` with
+`min_machines_running = 0` idles compute toward zero, at the cost of a cold start on
+the first request after a quiet spell. Avoid Fly's own Managed Postgres — its cheapest
+plan is $38/month.
+
+Watch the ledger: it is the only thing that grows. `MAX_BODY_BYTES` caps stored bodies
+and `LOG_RETENTION_DAYS` bounds history, enforced by a weekly `prune.yml` workflow or
+manually:
+
+```bash
+docker compose exec api python -m app.cli prune-logs --dry-run
+```
+
+---
+
+## 10. Notes and current limitations
+
 - The ledger records *forwarded* traffic. Requests rejected at the auth or rate-limit
   gate short-circuit before logging, so a 429 storm does not appear in the error-rate
   metric — deliberate, since a row per rejected request turns a flood into unbounded
@@ -197,4 +283,9 @@ proxied request (or seeded rows) to show anything.
 - The response cache is content-addressed and therefore **shared across projects**: an
   identical prompt from a different project is a hit. That is what makes it save money;
   namespace the key by project id in `cache_key` if you need tenant isolation.
+- The rate limiter **fails open**: if Redis is unreachable, requests are allowed and a
+  warning is logged. Availability is preferred over enforcement; return `False` in
+  `check_rate_limit` to invert that.
+- A single Fly machine with `min_machines_running = 0` means no redundancy and a cold
+  start after idle. Raise it to 2 for real availability, roughly doubling compute cost.
 - Never log, cache, or persist the `Authorization` header or any API key material.

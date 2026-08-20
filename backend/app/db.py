@@ -1,11 +1,12 @@
-"""Async SQLAlchemy engine, session factory, and DB bootstrap helpers.
+"""Async SQLAlchemy engine and session factory.
 
-Alembic is the production migration path; `create_all` here is dev convenience.
+The schema is owned by Alembic — run `alembic upgrade head`. Nothing here
+creates tables, so concurrent instances cannot race to build them.
 """
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -27,14 +28,6 @@ class Base(DeclarativeBase):
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency yielding an AsyncSession (async generator)."""
+    """FastAPI dependency yielding an AsyncSession."""
     async with AsyncSessionLocal() as session:
         yield session
-
-
-async def init_db() -> None:
-    """Create all tables (dev convenience; Alembic is the prod path)."""
-    import app.models  # noqa: F401  (ensure models are registered on Base.metadata)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)

@@ -1,0 +1,56 @@
+# Fly.io deployment. Postgres is Neon and Redis is Upstash, both reached over
+# the internet, so this app owns no volume and keeps no state.
+#
+# Secrets are set out of band and never appear here:
+#   fly secrets set DATABASE_URL="postgresql+asyncpg://...neon.tech/tap?ssl=require"
+#   fly secrets set REDIS_URL="rediss://...upstash.io:6379"
+#   fly secrets set DASHBOARD_PASSWORD="..." METRICS_TOKEN="..."
+
+app = "tap-token-analytics-proxy"
+primary_region = "iad"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+  # The dashboard is built into this image and served same-origin.
+  target = "runtime"
+
+[deploy]
+  # Runs once per deploy, before the new machines take traffic, so concurrent
+  # instances never race to migrate.
+  release_command = "alembic upgrade head"
+
+[env]
+  UPSTREAM_BASE_URL = "https://api.openai.com"
+  AUTH_ENABLED = "true"
+  CACHE_ENABLED = "true"
+  CACHE_TTL_SECONDS = "3600"
+  RATE_LIMIT_ENABLED = "true"
+  DEFAULT_RATE_LIMIT = "60"
+  RATE_LIMIT_WINDOW_SECONDS = "60"
+  LOGGING_ENABLED = "true"
+  MAX_BODY_BYTES = "16384"
+  LOG_RETENTION_DAYS = "30"
+  LOG_LEVEL = "INFO"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Scale to zero when idle: this is what keeps the bill near the compute
+  # floor. The cost is a cold start on the first request after a quiet period.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    # Readiness, not liveness — it verifies the database and Redis, so a machine
+    # whose dependencies are down is pulled out of rotation instead of serving
+    # errors.
+    path = "/health/ready"
+    method = "GET"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

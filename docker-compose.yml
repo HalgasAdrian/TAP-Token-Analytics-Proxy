@@ -3,23 +3,26 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      # The dev stage carries pytest and ruff, so `docker compose exec api
+      # pytest` works. The default (runtime) stage is the deploy artifact.
+      target: dev
     ports:
       - "8000:8000"
     env_file: .env
-    # Dev orchestration: the source is mounted and uvicorn reloads on change.
-    # The Dockerfile's baked-in COPY + plain uvicorn is the production artifact.
+    # Source is mounted and uvicorn reloads on change.
     volumes:
       - ./backend/app:/app/app
-      # Dev-only tooling (seed script); not baked into the production image.
       - ./backend/dev:/app/dev
+      - ./backend/tests:/app/tests
+      - ./backend/migrations:/app/migrations
+    # Migrations run before the app starts. In production this is Fly's
+    # release_command, which runs once per deploy rather than per instance.
     command:
-      - uvicorn
-      - app.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --reload
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
         condition: service_healthy

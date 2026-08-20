@@ -1,22 +1,18 @@
-"""Transparent proxy router for TAP.
+"""Transparent proxy for /v1/*.
 
-This module implements a single transparent, buffered forward route that relays
-requests to the configured upstream provider. All feature integrations
-(auth, rate limiting, caching, request logging) are guarded behind their
-settings flags, which default to OFF, so the base proxy runs before any
-assignment (A1/A2/A5/A6) is implemented.
+Requests pass through auth, rate limiting, and the cache before being forwarded
+upstream, buffered or streamed. Every stage is behind its settings flag.
 
-Security invariant: the caller's ``Authorization`` header (and any key
-material) is relayed upstream unchanged but is NEVER logged, cached, or
-persisted. Only request/response bodies and non-sensitive metadata are ever
-recorded.
+The caller's Authorization header is relayed upstream unchanged but is never
+logged, cached, or persisted.
 """
 
 from __future__ import annotations
 
 import json
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 from fastapi import (
@@ -43,25 +39,17 @@ from app.redis_client import get_redis
 
 router = APIRouter()
 
-# Headers that must not be relayed verbatim to the upstream (compared
-# case-insensitively). ``host`` and ``content-length`` are recomputed by the
-# HTTP client for the new request.
+# Recomputed by the HTTP client for the new request.
 _STRIPPED_HEADERS: frozenset[str] = frozenset({"host", "content-length"})
 
-# SSE frames are separated by a blank line.
 _SSE_EVENT_DELIMITER = b"\n\n"
 
-# Ceiling on the partial-event buffer held while watching a stream, so a
-# malformed upstream that never emits a delimiter cannot exhaust memory.
+# Ceiling on the partial-event buffer, so an upstream that never emits a
+# delimiter cannot exhaust memory.
 _MAX_SSE_RESIDUAL_BYTES = 64 * 1024
 
 
 def _filter_headers(headers: Any) -> dict[str, str]:
-    """Copy request headers to relay upstream, dropping hop-by-hop entries.
-
-    The caller's ``Authorization`` header is intentionally preserved
-    (pass-through auth) but is never logged elsewhere.
-    """
     return {
         key: value
         for key, value in headers.items()
@@ -70,7 +58,6 @@ def _filter_headers(headers: Any) -> dict[str, str]:
 
 
 def _parse_json(raw: bytes) -> Any | None:
-    """Best-effort JSON parse; returns ``None`` when the bytes are not JSON."""
     if not raw:
         return None
     try:
@@ -93,25 +80,16 @@ def _build_log_record(
     error: str | None,
     ttft_ms: float | None = None,
 ) -> dict[str, Any]:
-    """Assemble a request-log record.
+    """Assemble a request-log record, deriving token counts and cost.
 
-    Token counts (A3) and cost (A4) are derived here from the response body, so
-    every persisted row carries them.
-
-    Never contains the ``Authorization`` header, API keys, or any other key
-    material — only the request/response payloads and derived metadata.
+    Token columns stay NULL unless the provider actually reported usage, which
+    is meaningfully different from a genuine zero.
     """
-    # Only treat usage as reported when the provider actually sent a usage
-    # object. Error responses and usage-less bodies keep NULL token counts,
-    # which is meaningfully different from a genuine zero.
     usage = None
-    if isinstance(response_json, dict) and isinstance(
-        response_json.get("usage"), dict
-    ):
+    if isinstance(response_json, dict) and isinstance(response_json.get("usage"), dict):
         usage = get_adapter(provider).extract_usage(response_json)
 
-    # Prefer the model the provider echoed back — it resolves aliases to the
-    # dated id that was actually billed.
+    # The echoed-back model resolves an alias to the id that was billed.
     resolved_model = usage.model if usage is not None and usage.model else model
 
     return {
@@ -123,9 +101,7 @@ def _build_log_record(
         "input_tokens": usage.input_tokens if usage is not None else None,
         "output_tokens": usage.output_tokens if usage is not None else None,
         "cost_usd": (
-            compute_cost(
-                resolved_model or "", usage.input_tokens, usage.output_tokens
-            )
+            compute_cost(resolved_model or "", usage.input_tokens, usage.output_tokens)
             if usage is not None
             else None
         ),
@@ -149,32 +125,22 @@ async def proxy(
     session: AsyncSession = Depends(get_session),
     redis=Depends(get_redis),
 ) -> Response:
-    """Transparent buffered forward of ``/v1/*`` to the upstream provider."""
     handler_start = time.perf_counter()
     provider = DEFAULT_PROVIDER
     endpoint = request.url.path
 
-    # ------------------------------------------------------------------
-    # 1. Auth (A1) — resolve the owning project when enabled; otherwise the
-    #    proxy is pass-through and ``project`` stays None. Called inline so the
-    #    unimplemented stub can never run while AUTH_ENABLED is false.
-    # ------------------------------------------------------------------
     auth = None
     if settings.auth_enabled:
         auth = await require_auth(request, session)
     project_id = auth.project.id if auth is not None else None
 
-    # ------------------------------------------------------------------
-    # 2. Rate limit (A6) — reject with HTTP 429 when the key is over quota.
-    #    Budgets are per issued key, so one project's keys are limited
-    #    independently. Unauthenticated traffic shares a single anonymous
-    #    bucket at the configured default.
-    # ------------------------------------------------------------------
     if settings.rate_limit_enabled:
         allowed = await check_rate_limit(
             redis,
             auth.api_key.id if auth is not None else None,
-            auth.api_key.rate_limit if auth is not None else settings.default_rate_limit,
+            auth.api_key.rate_limit
+            if auth is not None
+            else settings.default_rate_limit,
             settings.rate_limit_window_seconds,
         )
         if not allowed:
@@ -183,19 +149,11 @@ async def proxy(
                 detail="Rate limit exceeded",
             )
 
-    # Read the client body exactly once; reuse for the cache key and the log
-    # record. Headers (which carry auth) are never placed into the record.
+    # Read the body once and reuse it for the cache key and the log record.
     body = await request.body()
     request_json = _parse_json(body)
-    model = (
-        request_json.get("model") if isinstance(request_json, dict) else None
-    )
+    model = request_json.get("model") if isinstance(request_json, dict) else None
 
-    # ------------------------------------------------------------------
-    # 2b. Streaming (A8) — a stream=true request cannot be buffered or cached,
-    #     so it takes the incremental path. Auth and rate limiting have already
-    #     been applied above; both paths share those gates.
-    # ------------------------------------------------------------------
     if isinstance(request_json, dict) and request_json.get("stream"):
         return await stream_proxy(
             path,
@@ -209,11 +167,6 @@ async def proxy(
             endpoint=endpoint,
         )
 
-    # ------------------------------------------------------------------
-    # 3. Cache (A5) — look up before forwarding; only attempt for POST requests
-    #    carrying a JSON object body (the idempotent/completion case). The
-    #    temperature / non-deterministic policy lives inside cache_key (A5).
-    # ------------------------------------------------------------------
     cacheable = (
         settings.cache_enabled
         and request.method == "POST"
@@ -225,37 +178,32 @@ async def proxy(
         cached = await cache_get(redis, ckey)
         if cached is not None:
             latency_ms = (time.perf_counter() - handler_start) * 1000.0
-            response = Response(
+            if settings.logging_enabled:
+                background_tasks.add_task(
+                    write_request_log,
+                    _build_log_record(
+                        endpoint=endpoint,
+                        provider=provider,
+                        model=model,
+                        status_code=status.HTTP_200_OK,
+                        latency_ms=latency_ms,
+                        project_id=project_id,
+                        cache_hit=True,
+                        request_json=request_json,
+                        response_json=cached,
+                        error=None,
+                    ),
+                )
+            return Response(
                 content=json.dumps(cached),
                 status_code=status.HTTP_200_OK,
                 media_type="application/json",
             )
-            if settings.logging_enabled:
-                record = _build_log_record(
-                    endpoint=endpoint,
-                    provider=provider,
-                    model=model,
-                    status_code=status.HTTP_200_OK,
-                    latency_ms=latency_ms,
-                    project_id=project_id,
-                    cache_hit=True,
-                    request_json=request_json,
-                    response_json=cached,
-                    error=None,
-                )
-                background_tasks.add_task(write_request_log, record)
-            return response
 
-    # ------------------------------------------------------------------
-    # Buffered forward to upstream using the shared client. Latency is measured
-    # with perf_counter() around the upstream call only.
-    # ------------------------------------------------------------------
     client: httpx.AsyncClient = request.app.state.http_client
     upstream_url = get_adapter(provider).build_upstream_url(path)
     forward_headers = _filter_headers(request.headers)
 
-    error: str | None = None
-    upstream: httpx.Response | None = None
     start = time.perf_counter()
     try:
         upstream = await client.request(
@@ -268,41 +216,32 @@ async def proxy(
         latency_ms = (time.perf_counter() - start) * 1000.0
     except httpx.HTTPError as exc:
         latency_ms = (time.perf_counter() - start) * 1000.0
-        # Redact: never surface header/key material. httpx error strings only
-        # reference the request line and error class.
+        # Only the error class, never the request detail, which carries headers.
         error = f"upstream request failed: {exc.__class__.__name__}"
-        status_code = status.HTTP_502_BAD_GATEWAY
-        response = Response(
+        if settings.logging_enabled:
+            background_tasks.add_task(
+                write_request_log,
+                _build_log_record(
+                    endpoint=endpoint,
+                    provider=provider,
+                    model=model,
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    latency_ms=latency_ms,
+                    project_id=project_id,
+                    cache_hit=False,
+                    request_json=request_json,
+                    response_json=None,
+                    error=error,
+                ),
+            )
+        return Response(
             content=json.dumps({"error": "upstream request failed"}),
-            status_code=status_code,
+            status_code=status.HTTP_502_BAD_GATEWAY,
             media_type="application/json",
         )
-        if settings.logging_enabled:
-            record = _build_log_record(
-                endpoint=endpoint,
-                provider=provider,
-                model=model,
-                status_code=status_code,
-                latency_ms=latency_ms,
-                project_id=project_id,
-                cache_hit=False,
-                request_json=request_json,
-                response_json=None,
-                error=error,
-            )
-            background_tasks.add_task(write_request_log, record)
-        return response
 
-    response = Response(
-        content=upstream.content,
-        status_code=upstream.status_code,
-        media_type=upstream.headers.get("content-type"),
-    )
-
-    # ------------------------------------------------------------------
-    # 3b. Cache store (A5) — populate on a successful, JSON-parseable miss.
-    # ------------------------------------------------------------------
     response_json = _parse_json(upstream.content)
+
     if (
         cacheable
         and ckey is not None
@@ -311,39 +250,36 @@ async def proxy(
     ):
         await cache_set(redis, ckey, response_json, settings.cache_ttl_seconds)
 
-    # ------------------------------------------------------------------
-    # 4. Logging (A2) — persist telemetry in a background task after responding.
-    #    The record never contains Authorization/key material.
-    # ------------------------------------------------------------------
     if settings.logging_enabled:
-        record = _build_log_record(
-            endpoint=endpoint,
-            provider=provider,
-            model=model,
-            status_code=upstream.status_code,
-            latency_ms=latency_ms,
-            project_id=project_id,
-            cache_hit=False,
-            request_json=request_json,
-            response_json=response_json,
-            error=None,
+        background_tasks.add_task(
+            write_request_log,
+            _build_log_record(
+                endpoint=endpoint,
+                provider=provider,
+                model=model,
+                status_code=upstream.status_code,
+                latency_ms=latency_ms,
+                project_id=project_id,
+                cache_hit=False,
+                request_json=request_json,
+                response_json=response_json,
+                error=None,
+            ),
         )
-        background_tasks.add_task(write_request_log, record)
 
-    return response
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type"),
+    )
 
 
 class _SseUsageWatcher:
-    """Observes an SSE stream in flight, without retaining it.
+    """Observes an SSE stream in flight without retaining it.
 
-    A streamed completion reports its token usage only in a trailing chunk, so
-    telemetry needs to see the end of the stream — but buffering the whole body
-    would defeat the point of streaming. This parses events as they pass and
-    keeps just two things: the newest usage envelope, and when the first
-    content token arrived.
-
-    Chunk boundaries do not align with event boundaries, so partial events are
-    held in `_residual` until their delimiter arrives.
+    A streamed completion reports usage only in a trailing chunk, so telemetry
+    needs the end of the stream while buffering none of it. Chunk boundaries do
+    not align with event boundaries, hence the residual buffer.
     """
 
     __slots__ = ("_residual", "usage_envelope", "ttft_ms", "_start")
@@ -357,12 +293,9 @@ class _SseUsageWatcher:
     def feed(self, chunk: bytes) -> None:
         self._residual += chunk
         while _SSE_EVENT_DELIMITER in self._residual:
-            raw_event, self._residual = self._residual.split(
-                _SSE_EVENT_DELIMITER, 1
-            )
+            raw_event, self._residual = self._residual.split(_SSE_EVENT_DELIMITER, 1)
             self._consume(raw_event)
 
-        # A stream that never emits a delimiter must not grow without bound.
         if len(self._residual) > _MAX_SSE_RESIDUAL_BYTES:
             self._residual = self._residual[-_MAX_SSE_RESIDUAL_BYTES:]
 
@@ -380,8 +313,8 @@ class _SseUsageWatcher:
             if not isinstance(parsed, dict):
                 continue
 
+            # Keep the latest: some providers send interim usage chunks.
             if isinstance(parsed.get("usage"), dict):
-                # Keep the latest: some providers send interim usage chunks.
                 self.usage_envelope = parsed
 
             if self.ttft_ms is None and _has_content_delta(parsed):
@@ -389,10 +322,10 @@ class _SseUsageWatcher:
 
 
 def _has_content_delta(chunk: dict[str, Any]) -> bool:
-    """True when a chunk carries actual generated text.
+    """True when a chunk carries generated text.
 
-    The opening chunk of an OpenAI stream announces the assistant role with an
-    empty string; counting that as the first token would understate TTFT.
+    The opening chunk announces the assistant role with an empty string;
+    counting it would understate time-to-first-token.
     """
     choices = chunk.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -418,11 +351,10 @@ async def stream_proxy(
     model: str | None,
     endpoint: str,
 ) -> Response:
-    """Relay an upstream SSE response incrementally, recording TTFT (A8).
+    """Relay an upstream SSE response incrementally, recording TTFT.
 
-    Called by `proxy` for `stream: true` requests. The cache is bypassed
-    entirely: an SSE body is not interchangeable with a buffered one, and
-    replaying a stored stream would report a fabricated TTFT.
+    The cache is bypassed: an SSE body is not interchangeable with a buffered
+    one, and replaying a stored stream would report a fabricated TTFT.
     """
     client: httpx.AsyncClient = request.app.state.http_client
     upstream_url = get_adapter(provider).build_upstream_url(path)
@@ -437,15 +369,13 @@ async def stream_proxy(
         headers=forward_headers,
     )
 
-    # Entered manually rather than with `async with`: the status code and
-    # content type are needed to construct the response *before* the body
-    # starts flowing, and the context has to outlive this function. The
-    # generator below owns closing it.
+    # Entered manually because the status code is needed to build the response
+    # before the body flows, and the context must outlive this function. The
+    # relay generator closes it.
     try:
         upstream = await stream_context.__aenter__()
     except httpx.HTTPError as exc:
         latency_ms = (time.perf_counter() - start) * 1000.0
-        error = f"upstream stream failed: {exc.__class__.__name__}"
         if settings.logging_enabled:
             background_tasks.add_task(
                 write_request_log,
@@ -459,7 +389,7 @@ async def stream_proxy(
                     cache_hit=False,
                     request_json=request_json,
                     response_json=None,
-                    error=error,
+                    error=f"upstream stream failed: {exc.__class__.__name__}",
                 ),
             )
         return Response(
@@ -477,22 +407,20 @@ async def stream_proxy(
                 watcher.feed(chunk)
                 yield chunk
         except httpx.HTTPError as exc:
-            # The response has already begun; the only honest signal left is to
-            # stop and record why.
             error = f"upstream stream interrupted: {exc.__class__.__name__}"
         finally:
             await stream_context.__aexit__(None, None, None)
-            latency_ms = (time.perf_counter() - start) * 1000.0
             if settings.logging_enabled:
-                # response_body is the trailing usage envelope, not the whole
-                # stream — the deltas are not retained anywhere.
+                # Awaited here rather than deferred to a background task, which
+                # would be collected too late to run. response_body is the
+                # trailing usage envelope; the deltas are not retained.
                 await write_request_log(
                     _build_log_record(
                         endpoint=endpoint,
                         provider=provider,
                         model=model,
                         status_code=upstream.status_code,
-                        latency_ms=latency_ms,
+                        latency_ms=(time.perf_counter() - start) * 1000.0,
                         project_id=project_id,
                         cache_hit=False,
                         request_json=request_json,

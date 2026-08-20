@@ -6,3 +6,4 @@ asyncpg==0.31.0
 redis==8.0.1
 pydantic-settings==2.14.2
 pydantic==2.13.4
+alembic==1.19.1

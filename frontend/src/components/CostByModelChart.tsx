@@ -11,11 +11,9 @@ import { useCostByModel, type CostByModelRow } from "../hooks/useCostByModel";
 import { AXIS_TICK, VIZ, formatUsd } from "../viz/tokens";
 import { MetricCard, PlotArea } from "./MetricCard";
 
-// Spend per model: comparing magnitude across named categories, so a bar chart
-// in one hue — the model name is on the axis, and coloring each bar separately
-// would imply a distinction that is not in the data.
-//
-// Horizontal, because model ids are long enough to collide as vertical ticks.
+// One hue, not one per model: the name is already on the axis, and per-bar color
+// would imply a distinction absent from the data. Horizontal because model ids
+// are long enough to collide as vertical ticks.
 export function CostByModelChart() {
   const query = useCostByModel();
 

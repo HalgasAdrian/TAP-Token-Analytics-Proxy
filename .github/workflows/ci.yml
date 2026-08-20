@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tap
+          POSTGRES_PASSWORD: tap
+          POSTGRES_DB: tap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tap"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The suite creates and uses its own database. It refuses to run against
+      # anything not named *_test, or against Redis index 0.
+      TEST_DATABASE_URL: postgresql+asyncpg://tap:tap@localhost:5432/tap_test
+      TEST_REDIS_URL: redis://localhost:6379/1
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Test
+        run: pytest
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  images:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build -f backend/Dockerfile --target runtime -t tap-api:ci .
+
+      - name: Build test image
+        run: docker build -f backend/Dockerfile --target dev -t tap-api:ci-dev .
+
+      - name: Production image must not carry test tooling
+        run: |
+          if docker run --rm --entrypoint sh tap-api:ci -c "python -c 'import pytest'" 2>/dev/null; then
+            echo "pytest is present in the production image"
+            exit 1
+          fi
+          echo "production image is free of test dependencies"
+
+      - name: Production image must not run as root
+        run: |
+          user=$(docker run --rm --entrypoint sh tap-api:ci -c "id -un")
+          echo "runs as: $user"
+          [ "$user" != "root" ]
+
+      - name: Production image must carry the built dashboard
+        run: |
+          docker run --rm --entrypoint sh tap-api:ci -c "test -f /app/static/index.html"
+          echo "dashboard present"
+
+  deploy:
+    name: Deploy to Fly
+    needs: [backend, frontend, images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: deploy-production
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keeps the pipeline green before Fly is set up, rather than failing on a
+      # missing secret.
+      - name: Check whether Fly is configured
+        id: fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -n "$FLY_API_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "FLY_API_TOKEN is not set; skipping deploy"
+          fi
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.fly.outputs.ready == 'true'
+
+      - name: Deploy
+        if: steps.fly.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only

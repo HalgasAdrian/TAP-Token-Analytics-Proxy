@@ -1,5 +1,7 @@
 # TAP — Token Analytics Proxy
 
+[![CI](https://github.com/HalgasAdrian/TAP-Token-Analytics-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/HalgasAdrian/TAP-Token-Analytics-Proxy/actions/workflows/ci.yml)
+
 **An LLM gateway and observability proxy.**
 
 A self-hosted reverse proxy that sits between an application and large language model provider APIs — forwarding every request transparently while recording, caching, rate-limiting, and reporting on the traffic that passes through it.
@@ -57,7 +59,9 @@ The stages, in order — each is a discrete, independently testable unit of the 
 | Charts | Recharts | Time-series and categorical visualization |
 | Server state | TanStack Query | Data fetching and cache synchronization |
 | Styling | Tailwind CSS | Interface styling |
-| Runtime and deployment | Docker Compose, Fly.io or Railway | Local orchestration and hosting |
+| Migrations | Alembic | Versioned, reviewable schema changes |
+| Local runtime | Docker Compose | Orchestration, plus a mock provider for offline work |
+| Hosting | Fly.io, Neon, Upstash | One stateless machine, managed Postgres and Redis |
 
 ## Data model
 
@@ -75,8 +79,10 @@ The backend, PostgreSQL, and Redis are orchestrated with Docker Compose; the das
 
 The pipeline described above is implemented end to end: pass-through forwarding, buffered and streamed responses, proxy-issued key authentication, per-key rate limiting, response caching, asynchronous request logging with token and cost accounting, the five aggregation endpoints, and the dashboard that reads them. Every feature sits behind an environment flag and each defaults to off, so the base proxy runs before anything else is turned on.
 
-Known limitations are enumerated at the end of [SETUP.md](SETUP.md). The most significant: the `/metrics/*` endpoints carry no authentication of their own, Alembic is named as the migration path but schema creation still runs through `create_all`, and requests rejected at the auth or rate-limit gate are counted nowhere — the ledger records forwarded traffic only.
+The deployment path is complete: Alembic owns the schema, the dashboard and metrics API sit behind a credential, the production image is unprivileged and carries no test tooling, and one Fly machine serves the API and dashboard from a single origin against managed Postgres and Redis. Every push runs lint, 142 tests across three tiers, both image builds, and a check that the models and migrations have not drifted.
+
+Known limitations are enumerated at the end of [SETUP.md](SETUP.md). The most significant: requests rejected at the auth or rate-limit gate are counted nowhere — the ledger records forwarded traffic only; the rate limiter fails open if Redis is unreachable; and a single machine scaled to zero trades redundancy and cold-start latency for cost.
 
 ## Future work
 
-In order of priority — authentication on the metrics surface and Alembic migrations, both prerequisites for a public deployment; additional provider adapters beyond the OpenAI-compatible surface; token-based rate limiting alongside request-based limits; and pre-aggregated retention rollups for long-horizon analytics.
+In order of priority — additional provider adapters beyond the OpenAI-compatible surface; token-based rate limiting alongside request-based limits; pre-aggregated rollups so long-horizon analytics survive ledger pruning; and per-project cache namespacing for installations that need tenant isolation.
