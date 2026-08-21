@@ -6,7 +6,7 @@
 #   fly secrets set REDIS_URL="rediss://...upstash.io:6379"
 #   fly secrets set DASHBOARD_PASSWORD="..." METRICS_TOKEN="..."
 
-app = "tap-token-analytics-proxy"
+app = "tap-analytics-adrian"
 primary_region = "iad"
 
 [build]
