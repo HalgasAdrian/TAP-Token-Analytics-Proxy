@@ -197,7 +197,11 @@ async def test_an_identical_request_is_served_from_cache(client):
     assert first.json()["id"] == second.json()["id"]
 
 
-async def test_a_cache_hit_is_flagged_and_faster(client, session):
+async def test_a_cache_hit_is_flagged_and_faster(client, session, monkeypatch):
+    # The suite strips the mock's latency, which leaves a hit and a miss both
+    # sub-millisecond and their ordering down to scheduling noise. Forwarding
+    # has to cost something measurable for the comparison to mean anything.
+    monkeypatch.setattr("dev.mock_upstream.MOCK_BASE_MS", 50.0)
     settings.cache_enabled = True
     settings.logging_enabled = True
 

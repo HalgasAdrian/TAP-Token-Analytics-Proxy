@@ -20,7 +20,18 @@
       "Bash(docker build *)",
       "Bash(docker run *)",
       "Bash(git check-ignore *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(docker version *)",
+      "Bash(npm -v)",
+      "Bash(lsof -nP -iTCP:8000 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:5173 -sTCP:LISTEN)",
+      "Bash(curl -s localhost:8000/health)",
+      "Bash(curl -s localhost:8000/health/ready)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" localhost:8000/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"localhost:8000/metrics/volume?granularity=hour\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}')",
+      "Bash(curl -s localhost:8000/v1/chat/completions -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"flight check\"}]}')",
+      "Bash(curl -sN localhost:8000/v1/chat/completions -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"full stream read\"}]}')"
     ]
   }
 }
