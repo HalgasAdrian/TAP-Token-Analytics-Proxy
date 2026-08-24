@@ -1,11 +1,11 @@
-"""Metrics API — aggregates request_logs into dashboard-ready JSON.
+"""Metrics API. Turns request_logs rows into JSON the dashboard can chart.
 
-Every metric is a query over the ledger; nothing is stored pre-aggregated, so
-the numbers cannot drift from the rows they summarise.
+Every metric is a query over request_logs. Nothing is stored pre-aggregated, so
+the numbers cannot disagree with the rows they summarise.
 
-The ledger records forwarded traffic only. Requests rejected at the auth or
-rate-limit gate short-circuit before logging, so "error rate" means errors among
-admitted requests.
+Only forwarded requests get a row. Requests rejected for a bad key or an
+exhausted rate limit stop before the row is written, so "error rate" means
+errors among the requests that were let through.
 """
 
 from __future__ import annotations

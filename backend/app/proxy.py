@@ -1,7 +1,7 @@
 """Transparent proxy for /v1/*.
 
 Requests pass through auth, rate limiting, and the cache before being forwarded
-upstream, buffered or streamed. Every stage is behind its settings flag.
+upstream, buffered or streamed. Every forwarded call is written to request_logs.
 
 The caller's Authorization header is relayed upstream unchanged but is never
 logged, cached, or persisted.
@@ -134,20 +134,17 @@ async def proxy(
         auth = await require_auth(request, session)
     project_id = auth.project.id if auth is not None else None
 
-    if settings.rate_limit_enabled:
-        allowed = await check_rate_limit(
-            redis,
-            auth.api_key.id if auth is not None else None,
-            auth.api_key.rate_limit
-            if auth is not None
-            else settings.default_rate_limit,
-            settings.rate_limit_window_seconds,
+    allowed = await check_rate_limit(
+        redis,
+        auth.api_key.id if auth is not None else None,
+        auth.api_key.rate_limit if auth is not None else settings.default_rate_limit,
+        settings.rate_limit_window_seconds,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
         )
-        if not allowed:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded",
-            )
 
     # Read the body once and reuse it for the cache key and the log record.
     body = await request.body()
@@ -167,33 +164,28 @@ async def proxy(
             endpoint=endpoint,
         )
 
-    cacheable = (
-        settings.cache_enabled
-        and request.method == "POST"
-        and isinstance(request_json, dict)
-    )
+    cacheable = request.method == "POST" and isinstance(request_json, dict)
     ckey: str | None = None
     if cacheable:
         ckey = cache_key(request_json)
         cached = await cache_get(redis, ckey)
         if cached is not None:
             latency_ms = (time.perf_counter() - handler_start) * 1000.0
-            if settings.logging_enabled:
-                background_tasks.add_task(
-                    write_request_log,
-                    _build_log_record(
-                        endpoint=endpoint,
-                        provider=provider,
-                        model=model,
-                        status_code=status.HTTP_200_OK,
-                        latency_ms=latency_ms,
-                        project_id=project_id,
-                        cache_hit=True,
-                        request_json=request_json,
-                        response_json=cached,
-                        error=None,
-                    ),
-                )
+            background_tasks.add_task(
+                write_request_log,
+                _build_log_record(
+                    endpoint=endpoint,
+                    provider=provider,
+                    model=model,
+                    status_code=status.HTTP_200_OK,
+                    latency_ms=latency_ms,
+                    project_id=project_id,
+                    cache_hit=True,
+                    request_json=request_json,
+                    response_json=cached,
+                    error=None,
+                ),
+            )
             return Response(
                 content=json.dumps(cached),
                 status_code=status.HTTP_200_OK,
@@ -218,22 +210,21 @@ async def proxy(
         latency_ms = (time.perf_counter() - start) * 1000.0
         # Only the error class, never the request detail, which carries headers.
         error = f"upstream request failed: {exc.__class__.__name__}"
-        if settings.logging_enabled:
-            background_tasks.add_task(
-                write_request_log,
-                _build_log_record(
-                    endpoint=endpoint,
-                    provider=provider,
-                    model=model,
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    latency_ms=latency_ms,
-                    project_id=project_id,
-                    cache_hit=False,
-                    request_json=request_json,
-                    response_json=None,
-                    error=error,
-                ),
-            )
+        background_tasks.add_task(
+            write_request_log,
+            _build_log_record(
+                endpoint=endpoint,
+                provider=provider,
+                model=model,
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                latency_ms=latency_ms,
+                project_id=project_id,
+                cache_hit=False,
+                request_json=request_json,
+                response_json=None,
+                error=error,
+            ),
+        )
         return Response(
             content=json.dumps({"error": "upstream request failed"}),
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -250,22 +241,21 @@ async def proxy(
     ):
         await cache_set(redis, ckey, response_json, settings.cache_ttl_seconds)
 
-    if settings.logging_enabled:
-        background_tasks.add_task(
-            write_request_log,
-            _build_log_record(
-                endpoint=endpoint,
-                provider=provider,
-                model=model,
-                status_code=upstream.status_code,
-                latency_ms=latency_ms,
-                project_id=project_id,
-                cache_hit=False,
-                request_json=request_json,
-                response_json=response_json,
-                error=None,
-            ),
-        )
+    background_tasks.add_task(
+        write_request_log,
+        _build_log_record(
+            endpoint=endpoint,
+            provider=provider,
+            model=model,
+            status_code=upstream.status_code,
+            latency_ms=latency_ms,
+            project_id=project_id,
+            cache_hit=False,
+            request_json=request_json,
+            response_json=response_json,
+            error=None,
+        ),
+    )
 
     return Response(
         content=upstream.content,
@@ -376,22 +366,21 @@ async def stream_proxy(
         upstream = await stream_context.__aenter__()
     except httpx.HTTPError as exc:
         latency_ms = (time.perf_counter() - start) * 1000.0
-        if settings.logging_enabled:
-            background_tasks.add_task(
-                write_request_log,
-                _build_log_record(
-                    endpoint=endpoint,
-                    provider=provider,
-                    model=model,
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    latency_ms=latency_ms,
-                    project_id=project_id,
-                    cache_hit=False,
-                    request_json=request_json,
-                    response_json=None,
-                    error=f"upstream stream failed: {exc.__class__.__name__}",
-                ),
-            )
+        background_tasks.add_task(
+            write_request_log,
+            _build_log_record(
+                endpoint=endpoint,
+                provider=provider,
+                model=model,
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                latency_ms=latency_ms,
+                project_id=project_id,
+                cache_hit=False,
+                request_json=request_json,
+                response_json=None,
+                error=f"upstream stream failed: {exc.__class__.__name__}",
+            ),
+        )
         return Response(
             content=json.dumps({"error": "upstream request failed"}),
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -410,25 +399,24 @@ async def stream_proxy(
             error = f"upstream stream interrupted: {exc.__class__.__name__}"
         finally:
             await stream_context.__aexit__(None, None, None)
-            if settings.logging_enabled:
-                # Awaited here rather than deferred to a background task, which
-                # would be collected too late to run. response_body is the
-                # trailing usage envelope; the deltas are not retained.
-                await write_request_log(
-                    _build_log_record(
-                        endpoint=endpoint,
-                        provider=provider,
-                        model=model,
-                        status_code=upstream.status_code,
-                        latency_ms=(time.perf_counter() - start) * 1000.0,
-                        project_id=project_id,
-                        cache_hit=False,
-                        request_json=request_json,
-                        response_json=watcher.usage_envelope,
-                        error=error,
-                        ttft_ms=watcher.ttft_ms,
-                    )
+            # Awaited here rather than deferred to a background task, which
+            # would be collected too late to run. response_body is the trailing
+            # usage envelope; the deltas are not retained.
+            await write_request_log(
+                _build_log_record(
+                    endpoint=endpoint,
+                    provider=provider,
+                    model=model,
+                    status_code=upstream.status_code,
+                    latency_ms=(time.perf_counter() - start) * 1000.0,
+                    project_id=project_id,
+                    cache_hit=False,
+                    request_json=request_json,
+                    response_json=watcher.usage_envelope,
+                    error=error,
+                    ttft_ms=watcher.ttft_ms,
                 )
+            )
 
     return StreamingResponse(
         relay(),

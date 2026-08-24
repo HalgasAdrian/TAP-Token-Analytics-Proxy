@@ -1,76 +1,113 @@
-# TAP (Token Analytics Proxy) — Setup
+# Setting up TAP
 
-TAP is a transparent proxy in front of an LLM provider (OpenAI by default). It forwards
-requests upstream while adding API-key auth, response caching, per-key rate limiting,
-request logging, cost accounting, and a metrics dashboard.
+This walks you through getting TAP running on your machine, sending a request
+through it, and seeing the dashboard. You don't need an OpenAI key. A fake
+OpenAI is included.
 
-Every feature is behind a flag, and all four default to **off** — so the base
-pass-through proxy runs the moment the stack is up, and each capability is opt-in.
-
----
-
-## 1. Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) + Docker Compose v2 (`docker compose`)
-- [Node.js](https://nodejs.org/) 18+ and npm (only needed for the frontend dashboard)
+If you just want to know what TAP is, read [README.md](README.md) first.
 
 ---
 
-## 2. Configure the environment
+## 1. What you need installed
 
-Copy the template and adjust if needed. **Never commit a real `.env`** — only
-`.env.example` (placeholders) is tracked.
+- [Docker](https://docs.docker.com/get-docker/), with Docker Compose v2 (check
+  with `docker compose version`)
+- [Node.js](https://nodejs.org/) 18 or newer, only for the dashboard
+
+You don't need Python installed. The backend runs inside Docker.
+
+---
+
+## 2. Create your .env file
 
 ```bash
 cp .env.example .env
 ```
 
-Every variable is documented in `.env.example`.
+The defaults work as-is, so you can move on. Every setting is explained by a
+comment in the file.
 
-Note: TAP does **not** hold an upstream API key. It uses **pass-through auth** — each
-caller sends their own provider `Authorization` header and TAP relays it upstream
-unchanged. Provider keys are never logged, cached, or persisted.
+Two things worth knowing:
+
+- **`.env` is not committed, and shouldn't be.** Only `.env.example` is in git.
+- **TAP does not store an OpenAI key.** Each caller sends their own OpenAI key
+  in the `Authorization` header, and TAP passes it straight through. TAP never
+  logs it, caches it, or saves it.
 
 ---
 
-## 3. Run the stack
+## 3. Start it
 
 ```bash
-docker compose up --build
+docker compose --profile dev up -d
 ```
 
-This starts three services:
+That starts four containers:
 
-- **api** — the FastAPI proxy on <http://localhost:8000>
-- **postgres** — request-log storage
-- **redis** — cache + rate-limit counters
+| Container | What it is | Port |
+| --- | --- | --- |
+| `api` | TAP itself | 8000 |
+| `postgres` | Stores the request rows | internal |
+| `redis` | Cache and rate limit counters | internal |
+| `mock-upstream` | The fake OpenAI | 9000 |
 
-The `api` service waits for Postgres and Redis to become healthy before starting.
+`api` waits for Postgres and Redis to be ready before it starts, then runs the
+database migrations, then starts the server.
 
-Verify it is up:
+Check it worked:
 
-- Health check: <http://localhost:8000/health> → `{"status": "ok"}`
-- Interactive API docs: <http://localhost:8000/docs>
+```bash
+docker compose ps                        # all four should say Up
+curl localhost:8000/health               # {"status": "ok"}
+curl localhost:8000/health/ready         # database and redis both "ok"
+```
 
-The Compose file is the **development** orchestration: it mounts `backend/app` and runs
-uvicorn with `--reload`, so edits apply without a rebuild. The image built by
-`backend/Dockerfile` (baked-in source, no reload) is the production artifact.
+If something looks wrong, the logs are the place to look:
+
+```bash
+docker compose logs api -f
+```
+
+### Two things that confuse people
+
+**`localhost:8000/` returns 404, and that's correct.** In development the
+dashboard is served separately by Vite on port 5173 (step 6). Only the
+production Docker image bundles the dashboard into the API.
+
+**Editing Python files doesn't need a restart.** Compose mounts `backend/app`
+into the container and runs the server with `--reload`. Editing `.env` *does*
+need a restart: `docker compose up -d api`.
 
 ---
 
-## 4. Send a request through the proxy
+## 4. Send a request through it
 
-Point any OpenAI SDK (or curl) at TAP's `/v1` base URL. With `AUTH_ENABLED=false`
-(the default) no TAP key is needed — just your own provider key.
+`.env.example` ships with `AUTH_ENABLED=false`, so no TAP key is needed yet.
 
-### Python (OpenAI SDK)
+### With curl
+
+```bash
+curl localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Hello through TAP!"}]
+  }'
+```
+
+You'll get back a fake completion from `mock-upstream`, in the same shape
+OpenAI uses.
+
+### With the OpenAI Python SDK
+
+The only change is `base_url`. Everything else stays the same.
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",   # TAP proxy, not api.openai.com
-    api_key="sk-...your-own-key...",        # relayed upstream unchanged
+    base_url="http://localhost:8000/v1",   # TAP, not api.openai.com
+    api_key="sk-anything-while-using-the-mock",
 )
 
 resp = client.chat.completions.create(
@@ -80,88 +117,77 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
-### curl
+### Streaming
+
+Add `"stream": true`. TAP passes the chunks through as they arrive and records
+how long the first chunk took (`ttft_ms`).
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer sk-...your-own-key..." \
+curl -N localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4o-mini",
-    "messages": [{"role": "user", "content": "Hello through TAP!"}]
-  }'
+  -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}'
 ```
 
-Streaming works the same way — add `"stream": true` and TAP relays the SSE chunks
-incrementally, recording time-to-first-token.
+One gotcha: if you pipe this into something that stops early, like `head`, the
+row doesn't get saved. TAP writes the row when the stream finishes, and cutting
+the connection means it never does. Let it run to `data: [DONE]`.
 
----
-
-## 5. Try it without a provider key
-
-A fake OpenAI-compatible upstream ships under Compose's `dev` profile, so the whole
-pipeline can be exercised with no API key and no provider spend:
+### See what got recorded
 
 ```bash
-docker compose --profile dev up --build
+docker compose exec postgres psql -U tap -d tap \
+  -c "select id, model, status_code, cache_hit, input_tokens, output_tokens, cost_usd, latency_ms, ttft_ms from request_logs order by id desc limit 5;"
 ```
 
-Then point TAP at it in `.env` and restart the api service:
+### Try the cache
 
-```
-UPSTREAM_BASE_URL=http://mock-upstream:9000
-```
+Send the exact same request twice. The response `id` will be identical the
+second time, because the second answer came from Redis. In the table above the
+second row will have `cache_hit = t` and a much smaller `latency_ms`.
 
-The mock returns realistic completions with token usage, supports streaming, and has
-two testing hooks: a model prefixed `fail-` returns a 500, and one prefixed `slow-`
-adds latency.
+### Try the rate limiter
 
-To populate the dashboard immediately, seed synthetic history:
+The default budget is 60 requests per minute. Send 65 and watch the last few
+come back as 429:
 
 ```bash
-docker compose exec api python -m dev.seed --hours 48 --requests 2400 --truncate
+for i in $(seq 1 65); do
+  curl -s -o /dev/null -w "%{http_code}\n" localhost:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"$i\"}]}"
+done | sort | uniq -c
 ```
 
 ---
 
-## 6. Enable the features
+## 5. The fake OpenAI
 
-Flip the flag in `.env` and restart the api service (`docker compose up -d api`).
+`mock-upstream` answers like OpenAI does, with realistic token counts, but it
+never contacts anyone and costs nothing. It has three hooks for testing:
 
-| Flag | Adds | Notes |
-|---|---|---|
-| `LOGGING_ENABLED` | one `request_logs` row per forwarded call | Prerequisite for every dashboard metric |
-| `AUTH_ENABLED` | TAP-issued API keys, 401 on an unknown key | Issue a key first — see below |
-| `CACHE_ENABLED` | Redis response cache with TTL | `CACHE_TTL_SECONDS` controls expiry |
-| `RATE_LIMIT_ENABLED` | per-key request budgets, 429 when over | Budget comes from the key's `rate_limit` |
+| What you send | What happens |
+| --- | --- |
+| a model starting with `fail-` | returns a 500 |
+| a model starting with `slow-` | adds about a second of delay |
+| `"stream": true` | sends SSE chunks, ending with a usage chunk |
 
-Related settings: `CACHE_TTL_SECONDS`, `DEFAULT_RATE_LIMIT`,
-`RATE_LIMIT_WINDOW_SECONDS`, `UPSTREAM_TIMEOUT_SECONDS`, `CORS_ORIGINS`, `LOG_LEVEL`.
+So `"model": "fail-gpt-4o"` is how you check that errors get recorded properly.
 
-### Issuing API keys
+To point TAP at the real OpenAI instead, change one line in `.env` and restart:
 
-With `AUTH_ENABLED=true`, callers must present a **TAP-issued** key (their provider key
-still rides along to the upstream). Keys are created with the admin CLI:
-
-```bash
-docker compose exec api python -m app.cli create-project --name "My App"
-docker compose exec api python -m app.cli issue-key --project-id 1 --name prod
+```
+UPSTREAM_BASE_URL=https://api.openai.com
 ```
 
-The plaintext key is printed **once** — only its SHA-256 hash is stored, so it cannot
-be recovered. If it is lost, revoke it and issue another:
-
 ```bash
-docker compose exec api python -m app.cli list-projects
-docker compose exec api python -m app.cli list-keys
-docker compose exec api python -m app.cli revoke-key --id 1
+docker compose up -d api
 ```
 
-Deactivating a project revokes every key it issued.
+Then callers need to send a real OpenAI key in the `Authorization` header.
 
 ---
 
-## 7. Run the frontend dashboard
+## 6. Run the dashboard
 
 ```bash
 cd frontend
@@ -169,71 +195,191 @@ npm install
 npm run dev
 ```
 
-The dashboard runs on <http://localhost:5173> and shows request volume, cost by model,
-latency percentiles, cache hit rate, and error rate, with a granularity selector
-(minute → month). If your backend is not on the default `http://localhost:8000`, set
-`VITE_API_BASE` before starting Vite:
+Open <http://localhost:5173>. There are five charts: request volume, cost by
+model, latency percentiles, cache hit rate, and error rate. The dropdown at the
+top right changes the time bucket, from minute up to month.
+
+Vite forwards `/v1` and `/metrics` to port 8000 for you, so there's no CORS
+setup and no API URL to configure.
+
+### Filling the charts with data
+
+An empty database means empty charts. Two ways to fix that.
+
+Send a bunch of real requests through the loop in step 4, or generate fake
+history instantly:
 
 ```bash
-VITE_API_BASE=http://localhost:8000 npm run dev
+docker compose exec api python -m dev.seed --hours 48 --requests 2400 --truncate
 ```
 
-Charts read from `/metrics/*`, which requires `LOGGING_ENABLED=true` and at least one
-proxied request (or seeded rows) to show anything.
+That writes 2,400 rows spread over the last 48 hours, with a believable mix of
+models, cache hits, and errors. `--truncate` clears `request_logs` first, so
+don't use it if you want to keep what's there.
 
 ---
 
-## 8. Tests
+## 7. API keys
+
+Setting `AUTH_ENABLED=true` in `.env` (then `docker compose up -d api`) means
+callers must send a TAP-issued key. This is how you attribute calls to a
+project and give different callers different rate limits.
+
+Create a project and issue a key:
+
+```bash
+docker compose exec api python -m app.cli create-project --name "My App"
+docker compose exec api python -m app.cli issue-key --project-id 1 --name prod
+```
+
+The key is printed once. Only its hash is stored, so it cannot be looked up
+later. Copy it somewhere safe. If you lose it, revoke it and issue another.
+
+Then use it:
+
+```bash
+curl localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer <the-key-you-just-got>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
+```
+
+Other commands:
+
+```bash
+docker compose exec api python -m app.cli list-projects
+docker compose exec api python -m app.cli list-keys
+docker compose exec api python -m app.cli revoke-key --id 1
+docker compose exec api python -m app.cli issue-key --project-id 1 --name ci --rate-limit 10
+```
+
+Marking a project inactive revokes every key belonging to it.
+
+### One thing to be aware of
+
+With `AUTH_ENABLED=true`, the `Authorization` header is read as your *TAP* key,
+and it's also the header that gets forwarded to OpenAI. Against the fake
+provider that's fine, because it ignores credentials. Against the real OpenAI
+the forwarded TAP key would be rejected. So right now, pick one: auth on with
+the mock, or auth off against real OpenAI. Giving the two keys separate headers
+is the fix, and it hasn't been done yet.
+
+---
+
+## 8. Running the tests
 
 ```bash
 docker compose exec api pytest
 docker compose exec api ruff check .
+docker compose exec api ruff format --check .
 ```
 
-The suite runs against a real Postgres and Redis — the metrics queries depend on
-`date_trunc`, `percentile_cont`, and JSONB — using a dedicated `tap_test` database and
-Redis index 1, so a run cannot touch development data. It creates that database itself
-on first use.
+139 tests, about 4 seconds.
 
-Three tiers: pure unit tests for cost, usage extraction, cache keys, and the SSE
-watcher; integration tests for auth, the limiter, the cache, and the five aggregations;
-and end-to-end tests that drive the whole proxy with the mock provider mounted as an
-ASGI app, so no socket or provider is involved.
+For the dashboard:
 
-CI runs the same suite plus `ruff`, the frontend typecheck and build, and both Docker
-image builds on every push and pull request.
+```bash
+cd frontend
+npx tsc --noEmit
+npm run build
+```
+
+Together those are exactly what CI runs, minus the Docker image builds.
+
+### How the tests are set up
+
+They run against a real Postgres and a real Redis, not fakes. The metrics
+queries use `date_trunc`, `percentile_cont`, and JSONB, and no stand-in gets
+those right.
+
+To avoid wiping your development data, the tests use a separate database called
+`tap_test` and Redis database 1 instead of 0. `conftest.py` refuses to start if
+the database name doesn't end in `_test`, or if Redis is pointed at database 0.
+It creates `tap_test` itself the first time you run it.
+
+The tests come in three groups:
+
+| Group | What it means | Examples |
+| --- | --- | --- |
+| Unit | Plain functions, no database | cost maths, cache keys, parsing token counts out of a stream |
+| Integration | Real Postgres and Redis | key lookup, rate limit counters, the five metrics queries |
+| End to end | A whole request through the real proxy | `test_proxy_e2e.py` |
+
+The end-to-end tests are the ones to read first if you want to understand what
+TAP promises. They mount the fake OpenAI directly into the test, so there's no
+network involved at all.
+
+Useful while working:
+
+```bash
+docker compose exec api pytest tests/test_proxy_e2e.py   # one file
+docker compose exec api pytest -k cache                  # anything with "cache" in the name
+docker compose exec api pytest -x                        # stop at the first failure
+docker compose exec api pytest -v                        # print every test name
+```
 
 ---
 
-## 9. Deploying
+## 9. Changing the database schema
 
-The production image serves the API **and** the built dashboard from one origin, so
-there is one thing to deploy, no CORS, and no API URL baked into the bundle.
-
-Managed Postgres and Redis are used rather than self-hosted containers, so the app
-owns no volume and holds no state — it can scale to zero without losing anything.
-
-### Schema changes
-
-Alembic owns the schema. `create_all` is gone: it never alters an existing table and
-races when several instances start at once.
+Alembic handles this. Don't use `create_all`: it won't alter a table that
+already exists, and two containers starting at once will trip over each other.
 
 ```bash
-docker compose exec api alembic upgrade head        # applied automatically on boot
-docker compose exec api alembic revision --autogenerate -m "describe the change"
+# after editing app/models.py
+docker compose exec api alembic revision --autogenerate -m "add a column"
+docker compose exec api alembic upgrade head
 ```
 
-A test asserts the models and migrations have not drifted, so forgetting to generate a
-revision fails CI rather than production.
+Compose runs `alembic upgrade head` on startup, so a fresh checkout is
+migrated automatically.
 
-### Provisioning
+There's a test that compares `models.py` against the migrations and fails if
+they've drifted apart. So if you forget to generate a migration, CI catches it
+instead of production.
 
-1. **Postgres** — create a project on [Neon](https://neon.com). Take the connection
-   string and convert the scheme to `postgresql+asyncpg://`, keeping `?ssl=require`.
-2. **Redis** — create a database on [Upstash](https://upstash.com). Use its `rediss://`
-   URL. Only the cache and rate-limit counters live here, so losing it is survivable.
-3. **Fly** — `fly launch --no-deploy` (the committed `fly.toml` already has the
-   config), then set the secrets:
+---
+
+## 10. Deleting old rows
+
+`request_logs` is the only thing here that grows forever, and the stored request
+and response bodies are most of its size. Two settings keep it in check:
+
+- `MAX_BODY_BYTES` (default 16 KB) replaces any body bigger than that with a
+  small marker recording its real size. The row survives, so the charts still
+  work.
+- `LOG_RETENTION_DAYS` (default 30) is how old a row has to be before
+  `prune-logs` will delete it.
+
+```bash
+docker compose exec api python -m app.cli prune-logs --dry-run   # count only
+docker compose exec api python -m app.cli prune-logs             # actually delete
+```
+
+In production a GitHub Actions workflow (`.github/workflows/prune.yml`) runs
+this once a week.
+
+---
+
+## 11. Deploying
+
+The production Docker image serves the API *and* the built dashboard from the
+same origin. One thing to deploy, no CORS, and no API URL compiled into the
+JavaScript.
+
+Postgres and Redis are hosted services rather than containers, so the app holds
+no data of its own and can be shut down without losing anything.
+
+### Setting it up
+
+1. **Postgres.** Create a project on [Neon](https://neon.com). Take the
+   connection string and change the beginning to `postgresql+asyncpg://`,
+   keeping `?ssl=require` on the end.
+2. **Redis.** Create a database on [Upstash](https://upstash.com) and use its
+   `rediss://` URL. Only the cache and rate limit counters live here, so losing
+   it isn't a disaster.
+3. **Fly.** Run `fly launch --no-deploy` (the committed `fly.toml` already has
+   the settings), then set the secrets and deploy:
 
 ```bash
 fly secrets set \
@@ -241,51 +387,37 @@ fly secrets set \
   REDIS_URL="rediss://...upstash.io:6379" \
   DASHBOARD_PASSWORD="$(openssl rand -base64 24)" \
   METRICS_TOKEN="$(openssl rand -hex 32)"
+
 fly deploy
 ```
 
-`release_command` runs `alembic upgrade head` once per deploy, before the new machines
-take traffic.
+`fly.toml` runs `alembic upgrade head` once per deploy, before the new machines
+start taking traffic.
 
-### Access
+### Who can see the dashboard
 
-The dashboard and `/metrics` are gated by `app/access.py`. `DASHBOARD_PASSWORD` works
-over HTTP Basic, which is what lets a browser authenticate without a secret inside the
-bundle; `METRICS_TOKEN` is a bearer token for scripts. `/v1/*` is unaffected — it has
-its own API-key auth — and `/health` stays public for the platform probe.
+`/metrics` and the dashboard are protected by `app/access.py`. There are two
+ways in:
 
-With neither set, the dashboard and metrics are open and startup logs a warning.
+- `DASHBOARD_PASSWORD` over HTTP Basic. This is for browsers. The browser shows
+  a login box and then remembers it, which means no password has to be built
+  into the JavaScript.
+- `METRICS_TOKEN` as a bearer token. This is for scripts.
 
-### Cost
+`/v1/*` isn't affected, since it has its own API key check. `/health` stays open
+so Fly can check the machine is alive.
 
-Roughly **$3–15/month**: one `shared-cpu-1x` 512MB machine at $3.32, Neon and Upstash
-on their free or usage-based tiers. `auto_stop_machines = "suspend"` with
-`min_machines_running = 0` idles compute toward zero, at the cost of a cold start on
-the first request after a quiet spell. Avoid Fly's own Managed Postgres — its cheapest
-plan is $38/month.
+If you set neither, the dashboard and metrics are open to anyone who can reach
+the server, and a warning is logged at startup.
 
-Watch the ledger: it is the only thing that grows. `MAX_BODY_BYTES` caps stored bodies
-and `LOG_RETENTION_DAYS` bounds history, enforced by a weekly `prune.yml` workflow or
-manually:
+### What it costs
 
-```bash
-docker compose exec api python -m app.cli prune-logs --dry-run
-```
+Roughly $3 to $15 a month. One `shared-cpu-1x` 512MB machine is $3.32, and Neon
+and Upstash have free tiers that a small setup fits inside.
 
----
+`fly.toml` sets `min_machines_running = 0`, so the machine suspends when nobody
+is using it. That's most of the saving. The trade-off is that the first request
+after a quiet spell waits for the machine to wake up.
 
-## 10. Notes and current limitations
-
-- The ledger records *forwarded* traffic. Requests rejected at the auth or rate-limit
-  gate short-circuit before logging, so a 429 storm does not appear in the error-rate
-  metric — deliberate, since a row per rejected request turns a flood into unbounded
-  database growth.
-- The response cache is content-addressed and therefore **shared across projects**: an
-  identical prompt from a different project is a hit. That is what makes it save money;
-  namespace the key by project id in `cache_key` if you need tenant isolation.
-- The rate limiter **fails open**: if Redis is unreachable, requests are allowed and a
-  warning is logged. Availability is preferred over enforcement; return `False` in
-  `check_rate_limit` to invert that.
-- A single Fly machine with `min_machines_running = 0` means no redundancy and a cold
-  start after idle. Raise it to 2 for real availability, roughly doubling compute cost.
-- Never log, cache, or persist the `Authorization` header or any API key material.
+Avoid Fly's own Managed Postgres for this. Its cheapest plan is $38 a month,
+which is more than everything else combined.

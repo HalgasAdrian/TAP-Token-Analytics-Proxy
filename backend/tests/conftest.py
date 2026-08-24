@@ -106,13 +106,10 @@ async def _database():
     await redis_client.aclose()
 
 
-# Every test starts from features off, regardless of the .env the container was
-# started with, and enables only what it exercises.
+# Every test starts from these settings, regardless of the .env the container
+# was started with.
 _BASELINE_SETTINGS = {
     "auth_enabled": False,
-    "cache_enabled": False,
-    "rate_limit_enabled": False,
-    "logging_enabled": False,
     "cache_ttl_seconds": 3600,
     "default_rate_limit": 60,
     "rate_limit_window_seconds": 60,
