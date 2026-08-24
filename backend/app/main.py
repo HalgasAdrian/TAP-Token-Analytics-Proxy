@@ -86,17 +86,13 @@ async def health() -> dict[str, str]:
 
 @app.get("/health/ready")
 async def readiness(response: Response) -> dict[str, str]:
-    """Readiness: the dependencies this configuration actually needs.
+    """Readiness: Postgres and Redis are both reachable.
 
-    A liveness probe that ignores the database would keep an instance in the
-    load balancer while every request fails. Only enabled features are treated
-    as required, so a Redis outage does not fail readiness when the cache and
-    limiter are off.
+    Every request writes a row and touches the rate-limit counters, so the app
+    needs both to work. A probe that returned 200 with a dead database would
+    keep a broken instance taking traffic.
     """
     checks: dict[str, str] = {}
-
-    database_required = settings.logging_enabled or settings.auth_enabled
-    redis_required = settings.cache_enabled or settings.rate_limit_enabled
 
     try:
         async with engine.connect() as connection:
@@ -113,10 +109,7 @@ async def readiness(response: Response) -> dict[str, str]:
         logger.warning("readiness: redis unreachable", exc_info=True)
         checks["redis"] = "unavailable"
 
-    degraded = (database_required and checks["database"] != "ok") or (
-        redis_required and checks["redis"] != "ok"
-    )
-    if degraded:
+    if any(state != "ok" for state in checks.values()):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {"status": "degraded", **checks}
 

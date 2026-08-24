@@ -6,7 +6,7 @@ metrics queries without generating real load.
 Run as a module, not a path: `python dev/seed.py` would put `/app/dev` on
 sys.path instead of `/app`, and the `app` imports below would fail.
 
-Writes only to the ledger. Pass --truncate to clear existing rows first.
+Writes only to request_logs. Pass --truncate to clear existing rows first.
 """
 
 from __future__ import annotations

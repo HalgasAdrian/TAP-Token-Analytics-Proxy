@@ -1,7 +1,7 @@
-name: Prune ledger
+name: Prune old request logs
 
-# Retention is enforced on a schedule rather than in the request path, so the
-# proxy never pays for it. LOG_RETENTION_DAYS on the app decides the window.
+# Old rows are deleted on a schedule rather than during a request, so the proxy
+# never pays for it. LOG_RETENTION_DAYS on the app decides how far back to keep.
 on:
   schedule:
     - cron: "17 4 * * 0"

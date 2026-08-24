@@ -21,9 +21,9 @@ _BODY_COLUMNS = ("request_body", "response_body")
 def _cap_body(body: object, limit: int) -> object:
     """Replace an oversized body with a marker recording its real size.
 
-    Bodies are the bulk of the ledger's storage, and a single large prompt or
-    completion can be megabytes. The marker keeps the row — and therefore the
-    metrics derived from it — while dropping the payload.
+    Bodies take up most of the space in request_logs, and one large prompt or
+    completion can be megabytes. The marker keeps the row, and so keeps the
+    metrics built from it, while dropping the payload.
     """
     if limit <= 0 or body is None:
         return body

@@ -1,6 +1,6 @@
-"""Ledger retention.
+"""Deleting old request_logs rows.
 
-The ledger grows without bound otherwise, and stored bodies are the bulk of it.
+The table grows forever otherwise, and the stored bodies are most of its size.
 Run `python -m app.cli prune-logs` on a schedule.
 """
 

@@ -35,16 +35,16 @@ async def add_rows(session, rows: list[dict]) -> None:
     await session.commit()
 
 
-# --- empty ledger -----------------------------------------------------------
+# --- no rows -----------------------------------------------------------
 
 
-async def test_empty_ledger_returns_empty_series(session):
+async def test_no_rows_returns_empty_series(session):
     assert await query_volume(session) == []
     assert await query_cost_by_model(session) == []
     assert await query_latency_percentiles(session) == []
 
 
-async def test_empty_ledger_returns_zeroed_ratios(session):
+async def test_no_rows_returns_zeroed_ratios(session):
     cache = await query_cache_hit_rate(session)
     assert cache == {
         "total": 0,

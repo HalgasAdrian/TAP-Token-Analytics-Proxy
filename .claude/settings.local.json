@@ -31,7 +31,11 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"localhost:8000/metrics/volume?granularity=hour\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}')",
       "Bash(curl -s localhost:8000/v1/chat/completions -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"flight check\"}]}')",
-      "Bash(curl -sN localhost:8000/v1/chat/completions -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"full stream read\"}]}')"
+      "Bash(curl -sN localhost:8000/v1/chat/completions -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"full stream read\"}]}')",
+      "Bash(grep -B1 \"^[a-z_/]*-$\")",
+      "Bash(grep -B1 -- \"-$\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}')",
+      "Bash(curl -s localhost:8000/v1/chat/completions -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"post-refactor probe\"}]}')"
     ]
   }
 }

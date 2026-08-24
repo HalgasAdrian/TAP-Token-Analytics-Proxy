@@ -1,12 +1,7 @@
-"""Application configuration via pydantic-settings.
-
-All feature flags default to False, so the base pass-through proxy runs with no
-further setup.
-"""
+"""Application settings, read from environment variables or the .env file."""
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Annotated
 
 from pydantic import field_validator
@@ -26,18 +21,22 @@ class Settings(BaseSettings):
     upstream_base_url: str = "https://api.openai.com"
     upstream_timeout_seconds: float = 60.0
 
-    # ---- Feature flags ----
+    # ---- Authentication ----
+    # Require a TAP-issued API key on /v1 requests. Off by default so local
+    # development works without issuing a key first.
     auth_enabled: bool = False
-    cache_enabled: bool = False
+
+    # ---- Cache ----
     cache_ttl_seconds: int = 3600
-    rate_limit_enabled: bool = False
+
+    # ---- Rate limiting ----
+    # Requests allowed per window. Each API key can override the default.
     default_rate_limit: int = 60
     rate_limit_window_seconds: int = 60
-    logging_enabled: bool = False
 
-    # ---- Ledger growth ----
-    # Request and response bodies dominate storage. A body whose JSON exceeds
-    # this many bytes is replaced with a size marker; 0 disables the cap.
+    # ---- Table growth ----
+    # Request and response bodies take up most of the space in request_logs. A
+    # body whose JSON is larger than this is replaced with a size marker.
     max_body_bytes: int = 16384
     # Age at which `prune-logs` deletes rows; 0 means keep everything.
     log_retention_days: int = 30
@@ -64,9 +63,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-
-@lru_cache
-def get_settings() -> Settings:
-    """Return the shared Settings singleton."""
-    return settings
