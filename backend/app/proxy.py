@@ -100,8 +100,16 @@ def _build_log_record(
         "status_code": status_code,
         "input_tokens": usage.input_tokens if usage is not None else None,
         "output_tokens": usage.output_tokens if usage is not None else None,
+        "cached_input_tokens": (
+            usage.cached_input_tokens if usage is not None else None
+        ),
         "cost_usd": (
-            compute_cost(resolved_model or "", usage.input_tokens, usage.output_tokens)
+            compute_cost(
+                resolved_model or "",
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cached_input_tokens,
+            )
             if usage is not None
             else None
         ),

@@ -42,6 +42,9 @@ class RequestLog(Base):
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Subset of input_tokens served from the provider's prompt cache, billed at
+    # a discount. Null for rows written before this was recorded.
+    cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     ttft_ms: Mapped[float | None] = mapped_column(Float, nullable=True)

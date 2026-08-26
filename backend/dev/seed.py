@@ -24,10 +24,15 @@ from app.models import RequestLog
 
 # Traffic mix, roughly what a small app sends: mostly the cheap model.
 _MODEL_WEIGHTS = {
-    "gpt-4o-mini": 0.65,
-    "gpt-4o": 0.20,
-    "gpt-3.5-turbo": 0.15,
+    "gpt-5.6-luna": 0.55,
+    "gpt-5.6-terra": 0.25,
+    "gpt-4o-mini": 0.15,
+    "gpt-5.6-sol": 0.05,
 }
+
+# Share of a prompt the provider serves from its cache, for the rows that hit.
+_PROMPT_CACHE_HIT_RATE = 0.4
+_PROMPT_CACHE_SHARE = 0.6
 
 _CACHE_HIT_RATE = 0.24
 _ERROR_RATE = 0.045
@@ -111,6 +116,12 @@ def _make_row(created_at: datetime) -> RequestLog:
     # some rows and null for others — as in real traffic.
     streamed = not cache_hit and random.random() < 0.25
 
+    cached_input_tokens = (
+        int(input_tokens * _PROMPT_CACHE_SHARE)
+        if random.random() < _PROMPT_CACHE_HIT_RATE
+        else 0
+    )
+
     return RequestLog(
         created_at=created_at,
         project_id=None,
@@ -120,7 +131,8 @@ def _make_row(created_at: datetime) -> RequestLog:
         status_code=200,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        cost_usd=compute_cost(model, input_tokens, output_tokens),
+        cached_input_tokens=cached_input_tokens,
+        cost_usd=compute_cost(model, input_tokens, output_tokens, cached_input_tokens),
         latency_ms=latency,
         ttft_ms=round(latency * random.uniform(0.15, 0.45), 2) if streamed else None,
         cache_hit=cache_hit,

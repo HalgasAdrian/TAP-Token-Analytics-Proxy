@@ -113,7 +113,9 @@ def test_the_unpriced_cache_cannot_grow_without_bound(monkeypatch):
 
 def test_every_entry_is_complete_and_positive():
     for model, rates in PRICING.items():
-        assert set(rates) == {"input", "output"}, model
+        # `cached` is optional; the provider does not publish one for every model.
+        assert set(rates) <= {"input", "cached", "output"}, model
+        assert {"input", "output"} <= set(rates), model
         assert rates["input"] > 0, model
         assert rates["output"] > 0, model
 
@@ -122,3 +124,69 @@ def test_output_is_never_cheaper_than_input():
     """Catches a transcription error that swapped the two columns."""
     for model, rates in PRICING.items():
         assert rates["output"] >= rates["input"], model
+
+
+# --- prompt-cache discount --------------------------------------------------
+
+
+def test_cached_tokens_bill_at_the_discounted_rate():
+    # gpt-5.6-sol: 1M input at $4.00, cached at $0.40.
+    full = compute_cost("gpt-5.6-sol", 1_000_000, 0)
+    half_cached = compute_cost("gpt-5.6-sol", 1_000_000, 0, 500_000)
+
+    # 500k at $4/M + 500k at $0.40/M = $2.00 + $0.20
+    assert full == pytest.approx(4.00)
+    assert half_cached == pytest.approx(2.20)
+
+
+def test_cached_tokens_are_a_subset_not_an_addition():
+    """A fully cached prompt costs the cached rate, not input + cached."""
+    assert compute_cost("gpt-5.6-sol", 1_000_000, 0, 1_000_000) == pytest.approx(0.40)
+
+
+def test_zero_cached_tokens_matches_the_undiscounted_call():
+    assert compute_cost("gpt-4o", 1000, 500, 0) == compute_cost("gpt-4o", 1000, 500)
+
+
+def test_a_model_without_a_cached_rate_gets_no_discount():
+    # gpt-5-pro publishes no cached rate, so cached tokens bill in full.
+    assert "cached" not in PRICING["gpt-5-pro"]
+    assert compute_cost("gpt-5-pro", 1_000_000, 0, 1_000_000) == pytest.approx(15.00)
+
+
+def test_more_cached_than_total_cannot_produce_a_negative_bill():
+    cost_value = compute_cost("gpt-5.6-sol", 1000, 0, 999_999)
+
+    assert cost_value >= 0
+    # Clamped to the input total, so it prices as fully cached.
+    assert cost_value == pytest.approx(1000 * 0.40 / 1_000_000)
+
+
+def test_negative_cached_tokens_are_ignored():
+    assert compute_cost("gpt-4o", 1000, 0, -500) == compute_cost("gpt-4o", 1000, 0)
+
+
+def test_cached_rate_is_never_more_than_the_input_rate():
+    for model, rates in PRICING.items():
+        if "cached" in rates:
+            assert rates["cached"] <= rates["input"], model
+            assert rates["cached"] > 0, model
+
+
+def test_savings_are_the_difference_against_the_full_rate():
+    # gpt-5.6-sol: $4.00 - $0.40 = $3.60 per 1M cached tokens.
+    assert cost.cache_savings("gpt-5.6-sol", 1_000_000) == pytest.approx(3.60)
+    assert cost.cache_savings("gpt-5.6-sol", 0) == 0.0
+
+
+def test_savings_are_zero_where_no_discount_exists():
+    assert cost.cache_savings("gpt-5-pro", 1_000_000) == 0.0
+    assert cost.cache_savings("unknown-model", 1_000_000) == 0.0
+
+
+def test_savings_reconcile_with_the_charged_cost():
+    """Discounted cost plus savings equals what the call would have cost."""
+    charged = compute_cost("gpt-4.1", 100_000, 0, 40_000)
+    saved = cost.cache_savings("gpt-4.1", 40_000)
+
+    assert charged + saved == pytest.approx(compute_cost("gpt-4.1", 100_000, 0))

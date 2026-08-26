@@ -78,3 +78,54 @@ def test_upstream_url_is_built_under_v1(monkeypatch):
 
 def test_unknown_provider_falls_back_to_the_default():
     assert get_adapter("anthropic") is get_adapter(DEFAULT_PROVIDER)
+
+
+def test_prompt_cache_hits_are_extracted():
+    usage = OpenAIAdapter().extract_usage(
+        {
+            "model": "gpt-5.6-sol",
+            "usage": {
+                "prompt_tokens": 2000,
+                "completion_tokens": 100,
+                "prompt_tokens_details": {"cached_tokens": 1024},
+            },
+        }
+    )
+    assert usage.input_tokens == 2000
+    assert usage.cached_input_tokens == 1024
+
+
+def test_the_responses_api_details_block_is_accepted():
+    usage = OpenAIAdapter().extract_usage(
+        {
+            "model": "gpt-5",
+            "usage": {
+                "input_tokens": 500,
+                "output_tokens": 20,
+                "input_tokens_details": {"cached_tokens": 128},
+            },
+        }
+    )
+    assert usage.cached_input_tokens == 128
+
+
+def test_no_details_block_means_no_cache_hits():
+    usage = OpenAIAdapter().extract_usage(
+        {"model": "gpt-4o", "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+    )
+    assert usage.cached_input_tokens == 0
+
+
+def test_a_malformed_details_block_is_ignored():
+    for details in ("nope", 7, [], {"cached_tokens": None}, {}):
+        usage = OpenAIAdapter().extract_usage(
+            {
+                "model": "gpt-4o",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": details,
+                },
+            }
+        )
+        assert usage.cached_input_tokens == 0, details
