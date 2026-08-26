@@ -58,10 +58,14 @@ export function CostByModelChart() {
                 formatter={(value: number, _name, item) => {
                   const row = item?.payload as CostByModelRow | undefined;
                   if (!row) return [formatUsd(value), "cost"];
+                  const saved =
+                    row.cache_savings_usd > 0
+                      ? ` · ${formatUsd(row.cache_savings_usd)} saved by prompt cache`
+                      : "";
                   return [
                     `${formatUsd(row.cost_usd)} · ${row.requests} req · ` +
                       `${row.input_tokens.toLocaleString()} in / ` +
-                      `${row.output_tokens.toLocaleString()} out tokens`,
+                      `${row.output_tokens.toLocaleString()} out tokens${saved}`,
                     "cost",
                   ];
                 }}

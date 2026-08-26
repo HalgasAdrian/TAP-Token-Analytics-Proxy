@@ -20,12 +20,27 @@ class Usage:
     model: str
     input_tokens: int
     output_tokens: int
+    # The subset of input_tokens the provider served from its prompt cache.
+    cached_input_tokens: int = 0
 
 
 def _as_token_count(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0
     return max(0, int(value))
+
+
+def _cached_input_tokens(usage: dict) -> int:
+    """Prompt-cache hits, reported under a details block that may be absent.
+
+    Chat Completions nests it under `prompt_tokens_details`, the Responses API
+    under `input_tokens_details`.
+    """
+    for key in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage.get(key)
+        if isinstance(details, dict):
+            return _as_token_count(details.get("cached_tokens"))
+    return 0
 
 
 class ProviderAdapter(ABC):
@@ -45,7 +60,7 @@ class OpenAIAdapter(ProviderAdapter):
 
         Accepts the Chat Completions spelling (prompt_tokens /
         completion_tokens) and the Responses API spelling (input_tokens /
-        output_tokens).
+        output_tokens), including each one's prompt-cache detail block.
         """
         if not isinstance(response_json, dict):
             return Usage(model="", input_tokens=0, output_tokens=0)
@@ -63,6 +78,7 @@ class OpenAIAdapter(ProviderAdapter):
             output_tokens=_as_token_count(
                 usage.get("completion_tokens", usage.get("output_tokens"))
             ),
+            cached_input_tokens=_cached_input_tokens(usage),
         )
 
 

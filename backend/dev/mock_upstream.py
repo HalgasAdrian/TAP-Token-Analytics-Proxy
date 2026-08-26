@@ -7,7 +7,8 @@ Runs only under Compose's `dev` profile; it is not part of the application
 package or the production image.
 
 Testing hooks: a model prefixed `fail-` returns 500, one prefixed `slow-` adds
-latency, and `stream: true` emits SSE ending with a usage chunk.
+latency, one prefixed `cached-` reports half its prompt as a prompt-cache hit,
+and `stream: true` emits SSE ending with a usage chunk.
 """
 
 from __future__ import annotations
@@ -50,6 +51,18 @@ def _prompt_tokens(payload: dict) -> int:
         if isinstance(message, dict):
             total += _estimate_tokens(str(message.get("content") or ""))
     return max(1, total)
+
+
+def _usage(model: str, prompt_tokens: int, completion_tokens: int) -> dict:
+    """Usage block, with a prompt-cache detail for `cached-` models."""
+    usage = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+    if model.startswith("cached-"):
+        usage["prompt_tokens_details"] = {"cached_tokens": prompt_tokens // 2}
+    return usage
 
 
 async def _simulate_latency(model: str) -> None:
@@ -103,11 +116,7 @@ async def chat_completions(request: Request) -> object:
                 "finish_reason": "stop",
             }
         ],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        },
+        "usage": _usage(model, prompt_tokens, completion_tokens),
     }
 
 
@@ -136,18 +145,13 @@ async def _stream_chunks(
 
     yield envelope({}, finish_reason="stop")
 
-    completion_tokens = _estimate_tokens(_REPLY)
     usage_chunk = {
         "id": completion_id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
         "choices": [],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        },
+        "usage": _usage(model, prompt_tokens, _estimate_tokens(_REPLY)),
     }
     yield f"data: {json.dumps(usage_chunk)}\n\n"
     yield "data: [DONE]\n\n"

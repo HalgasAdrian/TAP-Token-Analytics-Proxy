@@ -18,6 +18,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access import require_metrics_access
+from app.cost import cache_savings
 from app.db import get_session
 from app.models import RequestLog
 
@@ -163,6 +164,9 @@ async def query_cost_by_model(
                 func.coalesce(func.sum(RequestLog.output_tokens), 0).label(
                     "output_tokens"
                 ),
+                func.coalesce(func.sum(RequestLog.cached_input_tokens), 0).label(
+                    "cached_input_tokens"
+                ),
                 cost,
             ),
             start,
@@ -179,6 +183,12 @@ async def query_cost_by_model(
             "requests": int(row.requests),
             "input_tokens": int(row.input_tokens),
             "output_tokens": int(row.output_tokens),
+            "cached_input_tokens": int(row.cached_input_tokens),
+            # What the provider's prompt cache avoided, versus billing those
+            # tokens at the full input rate.
+            "cache_savings_usd": round(
+                cache_savings(row.model, int(row.cached_input_tokens)), 6
+            ),
             "cost_usd": round(float(row.cost_usd), 6),
         }
         for row in rows

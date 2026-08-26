@@ -6,6 +6,10 @@ export interface CostByModelRow {
   requests: number;
   input_tokens: number;
   output_tokens: number;
+  // Input tokens the provider served from its prompt cache, and what that
+  // discount avoided. Distinct from TAP's own cache, which skips the call.
+  cached_input_tokens: number;
+  cache_savings_usd: number;
   cost_usd: number;
 }
 

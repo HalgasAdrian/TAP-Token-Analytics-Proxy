@@ -253,3 +253,38 @@ async def test_a_streamed_request_bypasses_the_cache(client):
     second = await client.post("/v1/chat/completions", json=payload, headers=AUTH)
 
     assert first.text != second.text, "each stream must be fetched fresh"
+
+
+async def test_prompt_cache_hits_are_recorded_and_discounted(client, session):
+    # The mock reports half the prompt as cached for a `cached-` model.
+    await client.post(
+        "/v1/chat/completions",
+        json={**PAYLOAD, "model": "cached-gpt-4o"},
+        headers=AUTH,
+    )
+
+    row = (await logged_rows(session))[0]
+    assert row.cached_input_tokens == row.input_tokens // 2
+    assert row.cost_usd is not None
+
+
+async def test_a_call_without_prompt_caching_records_zero(client, session):
+    await client.post("/v1/chat/completions", json=PAYLOAD, headers=AUTH)
+
+    assert (await logged_rows(session))[0].cached_input_tokens == 0
+
+
+async def test_the_discount_lowers_the_recorded_cost(client, session):
+    body = {"model": "gpt-4o", "messages": [{"role": "user", "content": "x" * 400}]}
+
+    await client.post("/v1/chat/completions", json=body, headers=AUTH)
+    await client.post(
+        "/v1/chat/completions",
+        json={**body, "model": "cached-gpt-4o"},
+        headers=AUTH,
+    )
+
+    uncached, cached = await logged_rows(session)
+    # Same prompt size, but half of it billed at the cached rate.
+    assert cached.input_tokens == uncached.input_tokens
+    assert cached.cost_usd < uncached.cost_usd
