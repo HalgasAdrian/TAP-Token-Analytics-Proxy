@@ -2,7 +2,13 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.auth import generate_api_key, hash_api_key, require_auth, resolve_auth
+from app.auth import (
+    TAP_KEY_HEADER,
+    generate_api_key,
+    hash_api_key,
+    require_auth,
+    resolve_auth,
+)
 
 
 def make_request(headers: dict) -> Request:
@@ -57,40 +63,47 @@ async def test_deactivating_a_project_revokes_its_keys(session, issue_key):
     assert await resolve_auth(plaintext, session) is None
 
 
-async def test_missing_authorization_header_is_401(session):
+async def test_missing_tap_key_header_is_401(session):
     with pytest.raises(HTTPException) as raised:
         await require_auth(make_request({}), session)
     assert raised.value.status_code == 401
 
 
-async def test_non_bearer_scheme_is_401(session, issue_key):
+async def test_an_empty_tap_key_header_is_401(session):
+    with pytest.raises(HTTPException) as raised:
+        await require_auth(make_request({TAP_KEY_HEADER: ""}), session)
+    assert raised.value.status_code == 401
+
+
+async def test_a_tap_key_in_authorization_is_not_accepted(session, issue_key):
+    """Authorization belongs to the upstream provider, not to TAP."""
     plaintext, _ = await issue_key()
+
     with pytest.raises(HTTPException) as raised:
         await require_auth(
-            make_request({"Authorization": f"Token {plaintext}"}), session
+            make_request({"Authorization": f"Bearer {plaintext}"}), session
         )
+
     assert raised.value.status_code == 401
 
 
 async def test_unknown_key_is_401(session):
     with pytest.raises(HTTPException) as raised:
-        await require_auth(make_request({"Authorization": "Bearer nope"}), session)
+        await require_auth(make_request({TAP_KEY_HEADER: "nope"}), session)
     assert raised.value.status_code == 401
 
 
 async def test_error_details_never_echo_the_credential(session):
     with pytest.raises(HTTPException) as raised:
         await require_auth(
-            make_request({"Authorization": "Bearer super-secret-value"}), session
+            make_request({TAP_KEY_HEADER: "super-secret-value"}), session
         )
     assert "super-secret-value" not in str(raised.value.detail)
 
 
-async def test_valid_bearer_token_authenticates(session, issue_key):
+async def test_a_valid_tap_key_authenticates(session, issue_key):
     plaintext, project = await issue_key()
 
-    context = await require_auth(
-        make_request({"Authorization": f"Bearer {plaintext}"}), session
-    )
+    context = await require_auth(make_request({TAP_KEY_HEADER: plaintext}), session)
 
     assert context.project.id == project.id

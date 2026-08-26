@@ -1,16 +1,11 @@
 """Access control for the dashboard and the metrics API.
 
-These endpoints return aggregates only — no metrics response contains a request
-or response body — but they still describe traffic, spend, and failure rates, so
-they are not public once a credential is configured.
-
 Two credentials, because there are two kinds of caller:
 
 * ``METRICS_TOKEN`` as a bearer token, for scripts and scheduled jobs.
 * ``DASHBOARD_PASSWORD`` over HTTP Basic, for the browser. Basic is what lets
   the dashboard authenticate without shipping a secret inside its own bundle —
-  the browser prompts and then attaches the credential to same-origin requests
-  automatically.
+  the browser prompts and then attaches the credential automatically.
 
 With neither set, access is open and startup logs a warning.
 """

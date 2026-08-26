@@ -3,13 +3,10 @@
 Prices are USD per 1,000,000 tokens. Keep in sync with
 https://developers.openai.com/api/docs/pricing
 
-Each entry carries `input` and `output` rates, plus `cached` where the provider
-publishes a discounted rate for repeated prompt prefixes. A missing `cached`
-rate means no discount exists, so those tokens bill at the full input rate.
-
-Note this is the provider's prompt cache, which discounts the input tokens of a
-call that still happens. It is unrelated to TAP's own response cache, which
-avoids the call entirely.
+A missing `cached` rate means the provider publishes no prompt-cache discount
+for that model, so those tokens bill at the full input rate. This is the
+provider's prompt cache, which discounts a call that still happens — unrelated
+to TAP's own response cache, which avoids the call entirely.
 """
 
 from __future__ import annotations
@@ -96,9 +93,8 @@ def lookup_pricing(model: str) -> dict[str, float] | None:
         return PRICING[model]
 
     # A dated release is "<base>-<date>", so a prefix only counts when it ends on
-    # a hyphen. Matching bare prefixes instead would let "gpt-5" claim
-    # "gpt-5.6-sol" and bill a new family at an older family's rate — silently
-    # wrong numbers, which are worse than none. Longest match still wins, so
+    # a hyphen. Bare prefixes would let "gpt-5" claim "gpt-5.6-sol" and bill a
+    # new family at an older family's rate. Longest match wins, so
     # "gpt-4o-mini-2024-07-18" resolves to "gpt-4o-mini" and not "gpt-4o".
     candidates = [key for key in PRICING if model.startswith(f"{key}-")]
     if not candidates:
@@ -120,9 +116,8 @@ def compute_cost(
 ) -> float:
     """Return the USD cost of a call, or 0.0 for an unpriced model.
 
-    `cached_input_tokens` is the subset of `input_tokens` the provider served
-    from its prompt cache — it is counted inside the input total, not alongside
-    it, so it is billed at the discounted rate and deducted from the remainder.
+    `cached_input_tokens` is counted inside `input_tokens`, not alongside it, so
+    it bills at the discounted rate and is deducted from the remainder.
     """
     pricing = lookup_pricing(model)
     if pricing is None:

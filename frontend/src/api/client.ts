@@ -1,10 +1,6 @@
-// Typed API client for the dashboard. It reads aggregated /metrics data only,
-// and never sends or stores an Authorization header.
-
 // Empty means same origin: in production the API serves this bundle, and in
-// development Vite proxies /v1 and /metrics to it. Either way there is no
-// cross-origin request and no URL baked into the build. Set VITE_API_BASE only
-// to point the dashboard at a different host.
+// development Vite proxies /metrics to it. Either way there is no cross-origin
+// request and no URL baked into the build.
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 export type Bucket = "minute" | "hour" | "day" | "week" | "month";

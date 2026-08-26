@@ -1,7 +1,7 @@
 """Metrics API. Turns request_logs rows into JSON the dashboard can chart.
 
-Every metric is a query over request_logs. Nothing is stored pre-aggregated, so
-the numbers cannot disagree with the rows they summarise.
+Nothing is stored pre-aggregated, so the numbers cannot disagree with the rows
+they summarise.
 
 Only forwarded requests get a row. Requests rejected for a bad key or an
 exhausted rate limit stop before the row is written, so "error rate" means
@@ -148,7 +148,7 @@ async def query_cost_by_model(
     """Spend and token totals per model, most expensive first.
 
     Sums are coalesced because token columns are NULL for calls that reported no
-    usage; without it, a model whose every call failed would return NULL.
+    usage; a model whose every call failed would otherwise return NULL.
     """
     model = func.coalesce(RequestLog.model, "unknown").label("model")
     cost = func.coalesce(func.sum(RequestLog.cost_usd), 0.0).label("cost_usd")
@@ -184,8 +184,6 @@ async def query_cost_by_model(
             "input_tokens": int(row.input_tokens),
             "output_tokens": int(row.output_tokens),
             "cached_input_tokens": int(row.cached_input_tokens),
-            # What the provider's prompt cache avoided, versus billing those
-            # tokens at the full input rate.
             "cache_savings_usd": round(
                 cache_savings(row.model, int(row.cached_input_tokens)), 6
             ),

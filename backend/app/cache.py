@@ -28,8 +28,7 @@ def cache_key(payload: dict) -> str:
 
     Content-addressed, so entries are shared across projects — which is what
     makes the cache save money. Prefix the project id here if an installation
-    needs tenant isolation. A request with temperature > 0 is served its first
-    sampled response until the TTL expires.
+    needs tenant isolation.
     """
     canonical = {
         key: value for key, value in payload.items() if key not in _NON_SEMANTIC_FIELDS
@@ -39,11 +38,8 @@ def cache_key(payload: dict) -> str:
 
 
 async def cache_get(redis: Redis, key: str) -> dict | None:
-    """Return the cached object for `key`, or None on a miss.
-
-    Degrades to a miss rather than raising: a Redis outage should cost the proxy
-    its cache, not its availability.
-    """
+    """Degrades to a miss rather than raising: a Redis outage should cost the
+    proxy its cache, not its availability."""
     try:
         raw = await redis.get(key)
     except RedisError:
@@ -63,7 +59,6 @@ async def cache_get(redis: Redis, key: str) -> dict | None:
 
 
 async def cache_set(redis: Redis, key: str, value: dict, ttl: int) -> None:
-    """Store `value` under `key` with a `ttl`-second expiry."""
     if ttl <= 0:
         return
 

@@ -235,11 +235,11 @@ docker compose exec api python -m app.cli issue-key --project-id 1 --name prod
 The key is printed once. Only its hash is stored, so it cannot be looked up
 later. Copy it somewhere safe. If you lose it, revoke it and issue another.
 
-Then use it:
+Then use it. The TAP key goes in `X-TAP-Key`:
 
 ```bash
 curl localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer <the-key-you-just-got>" \
+  -H "X-TAP-Key: <the-key-you-just-got>" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
 ```
@@ -255,14 +255,37 @@ docker compose exec api python -m app.cli issue-key --project-id 1 --name ci --r
 
 Marking a project inactive revokes every key belonging to it.
 
-### One thing to be aware of
+### Two keys, two headers
 
-With `AUTH_ENABLED=true`, the `Authorization` header is read as your *TAP* key,
-and it's also the header that gets forwarded to OpenAI. Against the fake
-provider that's fine, because it ignores credentials. Against the real OpenAI
-the forwarded TAP key would be rejected. So right now, pick one: auth on with
-the mock, or auth off against real OpenAI. Giving the two keys separate headers
-is the fix, and it hasn't been done yet.
+A call through TAP with auth on carries two different credentials, and they
+don't share a header:
+
+| Header | Whose key | Who reads it |
+| --- | --- | --- |
+| `X-TAP-Key` | issued by TAP | TAP. Stripped before forwarding. |
+| `Authorization` | your OpenAI key | OpenAI. TAP passes it through untouched. |
+
+```bash
+curl localhost:8000/v1/chat/completions \
+  -H "X-TAP-Key: <your TAP key>" \
+  -H "Authorization: Bearer <your OpenAI key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
+```
+
+Keeping them apart is what lets `AUTH_ENABLED=true` work against the real
+OpenAI. If they shared one header, TAP would forward its own key upstream and
+OpenAI would reject it.
+
+With the OpenAI SDK, `X-TAP-Key` goes in `default_headers`:
+
+```python
+client = OpenAI(
+    base_url="https://your-app.fly.dev/v1",
+    api_key="<your OpenAI key>",
+    default_headers={"X-TAP-Key": "<your TAP key>"},
+)
+```
 
 ---
 
@@ -274,7 +297,7 @@ docker compose exec api ruff check .
 docker compose exec api ruff format --check .
 ```
 
-139 tests, about 4 seconds.
+168 tests, about 5 seconds.
 
 For the dashboard:
 

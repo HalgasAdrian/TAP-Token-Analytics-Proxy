@@ -1,8 +1,7 @@
 """Provider adapters.
 
-Each adapter maps a proxied provider onto TAP's internal model: how to build the
-upstream URL, and how to read token usage out of a response body. Adapters only
-ever see paths and parsed JSON bodies, never headers or key material.
+An adapter builds the upstream URL and reads token usage out of a response body.
+Adapters only ever see paths and parsed JSON, never headers or key material.
 """
 
 from __future__ import annotations
@@ -31,11 +30,8 @@ def _as_token_count(value: object) -> int:
 
 
 def _cached_input_tokens(usage: dict) -> int:
-    """Prompt-cache hits, reported under a details block that may be absent.
-
-    Chat Completions nests it under `prompt_tokens_details`, the Responses API
-    under `input_tokens_details`.
-    """
+    """Chat Completions nests this under `prompt_tokens_details`, the Responses
+    API under `input_tokens_details`, and either may be absent."""
     for key in ("prompt_tokens_details", "input_tokens_details"):
         details = usage.get(key)
         if isinstance(details, dict):
@@ -56,12 +52,9 @@ class OpenAIAdapter(ProviderAdapter):
         return f"{settings.upstream_base_url}/v1/{path}"
 
     def extract_usage(self, response_json: dict) -> Usage:
-        """Read token usage, yielding zeros for a body that reports none.
-
-        Accepts the Chat Completions spelling (prompt_tokens /
+        """Accepts the Chat Completions spelling (prompt_tokens /
         completion_tokens) and the Responses API spelling (input_tokens /
-        output_tokens), including each one's prompt-cache detail block.
-        """
+        output_tokens), yielding zeros for a body that reports neither."""
         if not isinstance(response_json, dict):
             return Usage(model="", input_tokens=0, output_tokens=0)
 

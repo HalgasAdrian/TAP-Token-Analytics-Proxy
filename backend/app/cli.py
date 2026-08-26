@@ -16,7 +16,7 @@ import asyncio
 
 from sqlalchemy import select
 
-from app.auth import generate_api_key, hash_api_key
+from app.auth import TAP_KEY_HEADER, generate_api_key, hash_api_key
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.models import ApiKey, Project
@@ -60,7 +60,7 @@ async def issue_key(project_id: int, name: str, rate_limit: int | None) -> None:
         print("  Copy this now — it is not recoverable:")
         print(f"    {plaintext}")
         print()
-        print("  Use it as: Authorization: Bearer <key>")
+        print(f"  Use it as: {TAP_KEY_HEADER}: <key>")
 
 
 async def list_projects() -> None:

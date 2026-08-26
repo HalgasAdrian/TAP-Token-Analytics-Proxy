@@ -1,8 +1,4 @@
-"""FastAPI application entrypoint.
-
-Wires the proxy and metrics routers and manages the shared httpx client, DB, and
-Redis lifecycle.
-"""
+"""FastAPI application entrypoint."""
 
 from __future__ import annotations
 
@@ -61,9 +57,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Paths that carry their own authentication, or none by design. Everything else
-# — the dashboard, /metrics, the OpenAPI docs — sits behind the credentials in
-# app.access once any are configured.
+# Carry their own authentication, or none by design. Everything else — the
+# dashboard, /metrics, the OpenAPI docs — sits behind app.access.
 _PUBLIC_PREFIXES = ("/v1", "/health")
 
 
@@ -80,18 +75,15 @@ app.include_router(metrics.router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Liveness: the process is up. Deliberately checks nothing else."""
+    """Liveness only. Deliberately checks nothing else."""
     return {"status": "ok"}
 
 
 @app.get("/health/ready")
 async def readiness(response: Response) -> dict[str, str]:
-    """Readiness: Postgres and Redis are both reachable.
-
-    Every request writes a row and touches the rate-limit counters, so the app
-    needs both to work. A probe that returned 200 with a dead database would
-    keep a broken instance taking traffic.
-    """
+    """Readiness. Every request needs both Postgres and Redis, so an instance
+    that has lost either should be pulled out of rotation rather than serve
+    errors."""
     checks: dict[str, str] = {}
 
     try:
@@ -116,9 +108,8 @@ async def readiness(response: Response) -> dict[str, str]:
     return {"status": "ok", **checks}
 
 
-# The built dashboard, present in the production image and absent in
-# development, where Vite serves it. Mounted last so it only catches paths no
-# route claimed; html=True serves index.html for client-side routes.
+# Present in the production image, absent in development where Vite serves it.
+# Mounted last so it only catches paths no route claimed.
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "static"
 
 if _DASHBOARD_DIR.is_dir():

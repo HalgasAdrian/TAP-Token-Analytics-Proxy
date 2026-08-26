@@ -9,8 +9,6 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Typed application settings loaded from environment / .env."""
-
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ---- Infrastructure ----
@@ -56,7 +54,6 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:
-        """Parse a comma-separated string into a list[str]."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
