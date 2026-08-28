@@ -64,6 +64,8 @@ rejected gets rejected before TAP does any real work.
 | `backend/app/cost.py` | Turning token counts into dollars. |
 | `backend/app/cli.py` | Admin commands: create a project, issue a key, delete old rows. |
 | `backend/dev/mock_upstream.py` | A fake OpenAI you can develop against, so you don't need a real key. |
+| `backend/dev/chat.py` | A terminal chat client that talks through TAP. |
+| `backend/dev/demo_traffic.py` | Sends a batch of varied requests, to fill the charts. |
 | `frontend/` | The React dashboard. |
 
 ## Tech used

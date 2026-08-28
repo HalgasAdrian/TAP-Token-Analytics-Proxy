@@ -223,6 +223,24 @@ That writes 2,400 rows spread over the last 48 hours, with a believable mix of
 models, cache hits, and errors. `--truncate` clears `request_logs` first, so
 don't use it if you want to keep what's there.
 
+`dev/seed.py` writes rows straight to the database, so nothing is proxied and
+no provider is called. To fill the charts with traffic that really went through
+TAP, use one of these instead. Both need a provider key, and both cost what the
+calls cost:
+
+```bash
+export TAP_KEY=<a TAP key>  OPENAI_KEY=<your provider key>
+export TAP_URL=http://localhost:8000        # omit to target the deployment
+
+python3 backend/dev/chat.py          # chat in the terminal, one call per message
+python3 backend/dev/demo_traffic.py  # ~45 varied calls over a few minutes
+```
+
+`demo_traffic.py` mixes models, streams some calls, repeats a prompt so the
+cache chart has hits, and sends a few to a misspelled model so the error rate
+isn't zero. It paces itself under the rate limit, because a request rejected
+for exceeding the limit never gets a row.
+
 ---
 
 ## 7. API keys
