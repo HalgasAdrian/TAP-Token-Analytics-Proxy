@@ -36,11 +36,30 @@ from app.redis_client import get_redis
 
 router = APIRouter()
 
-# host and content-length are recomputed by the HTTP client for the new request.
-# The TAP key is ours and means nothing upstream, so it stops here.
+# Never forwarded upstream. host and content-length are recomputed by the HTTP
+# client, the TAP key is ours, and the rest are hop-by-hop headers (RFC 7230) or
+# describe the connection that reached us rather than the caller's request.
 _STRIPPED_HEADERS: frozenset[str] = frozenset(
-    {"host", "content-length", TAP_KEY_HEADER.lower()}
+    {
+        "host",
+        "content-length",
+        TAP_KEY_HEADER.lower(),
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "via",
+        "forwarded",
+    }
 )
+
+# Added by whatever proxy fronts the app: Fly uses both shapes. Relaying them
+# tells the provider about our network and can change how it reads the request.
+_STRIPPED_PREFIXES: tuple[str, ...] = ("x-forwarded-", "fly-")
 
 _SSE_EVENT_DELIMITER = b"\n\n"
 
@@ -54,6 +73,7 @@ def _filter_headers(headers: Any) -> dict[str, str]:
         key: value
         for key, value in headers.items()
         if key.lower() not in _STRIPPED_HEADERS
+        and not key.lower().startswith(_STRIPPED_PREFIXES)
     }
 
 
@@ -64,6 +84,21 @@ def _parse_json(raw: bytes) -> Any | None:
         return json.loads(raw)
     except (ValueError, TypeError):
         return None
+
+
+def _request_usage_reporting(payload: dict[str, Any]) -> bytes:
+    """Turn on usage reporting for a streamed call, and re-encode the body.
+
+    A streamed response carries no usage block unless it was asked for, so
+    without this every caller who forgot the flag would be recorded with no
+    tokens and no cost — which is the one thing TAP exists to measure.
+    """
+    options = payload.get("stream_options")
+    payload["stream_options"] = {
+        **(options if isinstance(options, dict) else {}),
+        "include_usage": True,
+    }
+    return json.dumps(payload).encode()
 
 
 def _build_log_record(
@@ -160,7 +195,7 @@ async def proxy(
             path,
             request,
             background_tasks,
-            body=body,
+            body=_request_usage_reporting(request_json),
             request_json=request_json,
             project_id=project_id,
             provider=provider,

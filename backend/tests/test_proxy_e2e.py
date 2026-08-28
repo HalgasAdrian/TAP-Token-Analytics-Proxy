@@ -136,6 +136,25 @@ def test_the_tap_key_is_never_forwarded_upstream():
     assert forwarded["Authorization"] == "Bearer sk-provider"
 
 
+def test_proxy_and_platform_headers_are_not_relayed():
+    """Fly stamps these on every inbound request; OpenAI rejects the key when
+    they arrive alongside it."""
+    forwarded = _filter_headers(
+        {
+            "Authorization": "Bearer sk-provider",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive",
+            "Via": "1.1 fly.io",
+            "X-Forwarded-For": "203.0.113.7",
+            "X-Forwarded-Proto": "https",
+            "Fly-Request-Id": "abc123",
+            "Fly-Client-IP": "203.0.113.7",
+        }
+    )
+
+    assert set(forwarded) == {"Authorization", "Content-Type"}
+
+
 # --- rate limiting ----------------------------------------------------------
 
 
@@ -255,6 +274,34 @@ async def test_streaming_records_ttft_and_usage(client, session):
     assert row.input_tokens > 0
     assert row.output_tokens > 0
     assert row.cost_usd > 0
+
+
+async def test_usage_is_recorded_even_when_the_caller_never_asked_for_it(
+    client, session
+):
+    """The provider withholds usage on a stream unless the request opts in, so
+    TAP opts in on the caller's behalf."""
+    await client.post(
+        "/v1/chat/completions", json={**PAYLOAD, "stream": True}, headers=AUTH
+    )
+
+    row = (await logged_rows(session))[0]
+    assert row.request_body["stream_options"] == {"include_usage": True}
+    assert row.input_tokens > 0
+    assert row.cost_usd > 0
+
+
+async def test_a_caller_s_own_stream_options_are_kept(client, session):
+    await client.post(
+        "/v1/chat/completions",
+        json={**PAYLOAD, "stream": True, "stream_options": {"something_else": 1}},
+        headers=AUTH,
+    )
+
+    assert (await logged_rows(session))[0].request_body["stream_options"] == {
+        "something_else": 1,
+        "include_usage": True,
+    }
 
 
 async def test_a_streamed_request_bypasses_the_cache(client):

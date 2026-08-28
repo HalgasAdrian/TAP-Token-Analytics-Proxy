@@ -133,8 +133,8 @@ dashboard that reads them.
 
 It's also deployable. Alembic owns the database schema, the dashboard and
 metrics sit behind a password, the production Docker image runs as a normal user
-with no test tools in it, and one Fly machine serves both the API and the
-dashboard against hosted Postgres and Redis. Every push runs the linter, 168
+with no test tools in it, and two Fly machines serve both the API and the
+dashboard against hosted Postgres and Redis. Every push runs the linter, 171
 tests, and both Docker builds.
 
 ## Known limitations
@@ -155,8 +155,9 @@ Worth knowing before you rely on any of this:
 - **Prices are a hardcoded table.** `cost.py` covers the current OpenAI range,
   but a model that isn't in the table records a cost of 0 and logs a warning.
   New models need adding by hand.
-- **One machine, scaled to zero.** Cheap, but there's no backup machine and the
-  first request after an idle period is slow while the machine wakes up.
+- **Two machines, both scaled to zero.** Cheap, and one can cover while the
+  other is down, but both suspend when idle, so the first request after a quiet
+  period is slow while a machine wakes up.
 
 ## Ideas for later
 
