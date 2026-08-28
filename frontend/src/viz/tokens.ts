@@ -1,8 +1,6 @@
-// Chart tokens, referenced by role so the palette changes in one place.
-//
-// These hexes are validated against the white card surface for lightness band,
-// chroma, CVD separation, and contrast. Blue + orange (the only pair sharing a
-// chart) clear every gate; orange and red do not, and are never co-plotted.
+// Validated against the white card surface for lightness band, chroma, CVD
+// separation, and contrast. Blue + orange (the only pair sharing a chart) clear
+// every gate; orange and red do not, and are never co-plotted.
 
 export const VIZ = {
   series1: "#2a78d6",

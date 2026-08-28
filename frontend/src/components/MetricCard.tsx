@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
 
-// The shell every chart shares, plus its loading, error, and empty states, so a
-// chart body only renders the case where data exists.
-
 const PANEL_HEIGHT = "h-64";
 
 function Panel({ children }: { children: ReactNode }) {

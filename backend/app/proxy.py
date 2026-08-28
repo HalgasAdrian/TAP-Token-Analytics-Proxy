@@ -1,8 +1,5 @@
 """Transparent proxy for /v1/*.
 
-Requests pass through auth, rate limiting, and the cache before being forwarded
-upstream, buffered or streamed. Every forwarded call is written to request_logs.
-
 The caller's Authorization header is relayed upstream unchanged but is never
 logged, cached, or persisted.
 """
@@ -27,7 +24,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_auth
+from app.auth import TAP_KEY_HEADER, require_auth
 from app.cache import cache_get, cache_key, cache_set
 from app.config import settings
 from app.cost import compute_cost
@@ -39,8 +36,30 @@ from app.redis_client import get_redis
 
 router = APIRouter()
 
-# Recomputed by the HTTP client for the new request.
-_STRIPPED_HEADERS: frozenset[str] = frozenset({"host", "content-length"})
+# Never forwarded upstream. host and content-length are recomputed by the HTTP
+# client, the TAP key is ours, and the rest are hop-by-hop headers (RFC 7230) or
+# describe the connection that reached us rather than the caller's request.
+_STRIPPED_HEADERS: frozenset[str] = frozenset(
+    {
+        "host",
+        "content-length",
+        TAP_KEY_HEADER.lower(),
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "via",
+        "forwarded",
+    }
+)
+
+# Added by whatever proxy fronts the app: Fly uses both shapes. Relaying them
+# tells the provider about our network and can change how it reads the request.
+_STRIPPED_PREFIXES: tuple[str, ...] = ("x-forwarded-", "fly-")
 
 _SSE_EVENT_DELIMITER = b"\n\n"
 
@@ -54,6 +73,7 @@ def _filter_headers(headers: Any) -> dict[str, str]:
         key: value
         for key, value in headers.items()
         if key.lower() not in _STRIPPED_HEADERS
+        and not key.lower().startswith(_STRIPPED_PREFIXES)
     }
 
 
@@ -64,6 +84,21 @@ def _parse_json(raw: bytes) -> Any | None:
         return json.loads(raw)
     except (ValueError, TypeError):
         return None
+
+
+def _request_usage_reporting(payload: dict[str, Any]) -> bytes:
+    """Turn on usage reporting for a streamed call, and re-encode the body.
+
+    A streamed response carries no usage block unless it was asked for, so
+    without this every caller who forgot the flag would be recorded with no
+    tokens and no cost — which is the one thing TAP exists to measure.
+    """
+    options = payload.get("stream_options")
+    payload["stream_options"] = {
+        **(options if isinstance(options, dict) else {}),
+        "include_usage": True,
+    }
+    return json.dumps(payload).encode()
 
 
 def _build_log_record(
@@ -80,11 +115,8 @@ def _build_log_record(
     error: str | None,
     ttft_ms: float | None = None,
 ) -> dict[str, Any]:
-    """Assemble a request-log record, deriving token counts and cost.
-
-    Token columns stay NULL unless the provider actually reported usage, which
-    is meaningfully different from a genuine zero.
-    """
+    """Token columns stay NULL unless the provider reported usage, which is
+    meaningfully different from a genuine zero."""
     usage = None
     if isinstance(response_json, dict) and isinstance(response_json.get("usage"), dict):
         usage = get_adapter(provider).extract_usage(response_json)
@@ -154,7 +186,6 @@ async def proxy(
             detail="Rate limit exceeded",
         )
 
-    # Read the body once and reuse it for the cache key and the log record.
     body = await request.body()
     request_json = _parse_json(body)
     model = request_json.get("model") if isinstance(request_json, dict) else None
@@ -164,7 +195,7 @@ async def proxy(
             path,
             request,
             background_tasks,
-            body=body,
+            body=_request_usage_reporting(request_json),
             request_json=request_json,
             project_id=project_id,
             provider=provider,
@@ -275,9 +306,9 @@ async def proxy(
 class _SseUsageWatcher:
     """Observes an SSE stream in flight without retaining it.
 
-    A streamed completion reports usage only in a trailing chunk, so telemetry
-    needs the end of the stream while buffering none of it. Chunk boundaries do
-    not align with event boundaries, hence the residual buffer.
+    Usage arrives only in a trailing chunk, so telemetry needs the end of the
+    stream while buffering none of it. Chunk boundaries do not align with event
+    boundaries, hence the residual buffer.
     """
 
     __slots__ = ("_residual", "usage_envelope", "ttft_ms", "_start")
@@ -320,11 +351,8 @@ class _SseUsageWatcher:
 
 
 def _has_content_delta(chunk: dict[str, Any]) -> bool:
-    """True when a chunk carries generated text.
-
-    The opening chunk announces the assistant role with an empty string;
-    counting it would understate time-to-first-token.
-    """
+    """The opening chunk announces the assistant role with an empty string;
+    counting it as the first token would understate TTFT."""
     choices = chunk.get("choices")
     if not isinstance(choices, list) or not choices:
         return False

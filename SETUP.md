@@ -122,6 +122,12 @@ print(resp.choices[0].message.content)
 Add `"stream": true`. TAP passes the chunks through as they arrive and records
 how long the first chunk took (`ttft_ms`).
 
+OpenAI only reports token usage on a stream if the request asks for it, so TAP
+adds `stream_options: {"include_usage": true}` to every streamed request. That
+means tokens and cost get recorded whether or not the caller thought to ask.
+The cost is one extra chunk at the end of the stream carrying the usage totals
+and an empty `choices` list, which the OpenAI SDKs already expect.
+
 ```bash
 curl -N localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -235,11 +241,11 @@ docker compose exec api python -m app.cli issue-key --project-id 1 --name prod
 The key is printed once. Only its hash is stored, so it cannot be looked up
 later. Copy it somewhere safe. If you lose it, revoke it and issue another.
 
-Then use it:
+Then use it. The TAP key goes in `X-TAP-Key`:
 
 ```bash
 curl localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer <the-key-you-just-got>" \
+  -H "X-TAP-Key: <the-key-you-just-got>" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
 ```
@@ -255,14 +261,37 @@ docker compose exec api python -m app.cli issue-key --project-id 1 --name ci --r
 
 Marking a project inactive revokes every key belonging to it.
 
-### One thing to be aware of
+### Two keys, two headers
 
-With `AUTH_ENABLED=true`, the `Authorization` header is read as your *TAP* key,
-and it's also the header that gets forwarded to OpenAI. Against the fake
-provider that's fine, because it ignores credentials. Against the real OpenAI
-the forwarded TAP key would be rejected. So right now, pick one: auth on with
-the mock, or auth off against real OpenAI. Giving the two keys separate headers
-is the fix, and it hasn't been done yet.
+A call through TAP with auth on carries two different credentials, and they
+don't share a header:
+
+| Header | Whose key | Who reads it |
+| --- | --- | --- |
+| `X-TAP-Key` | issued by TAP | TAP. Stripped before forwarding. |
+| `Authorization` | your OpenAI key | OpenAI. TAP passes it through untouched. |
+
+```bash
+curl localhost:8000/v1/chat/completions \
+  -H "X-TAP-Key: <your TAP key>" \
+  -H "Authorization: Bearer <your OpenAI key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
+```
+
+Keeping them apart is what lets `AUTH_ENABLED=true` work against the real
+OpenAI. If they shared one header, TAP would forward its own key upstream and
+OpenAI would reject it.
+
+With the OpenAI SDK, `X-TAP-Key` goes in `default_headers`:
+
+```python
+client = OpenAI(
+    base_url="https://your-app.fly.dev/v1",
+    api_key="<your OpenAI key>",
+    default_headers={"X-TAP-Key": "<your TAP key>"},
+)
+```
 
 ---
 
@@ -274,7 +303,7 @@ docker compose exec api ruff check .
 docker compose exec api ruff format --check .
 ```
 
-139 tests, about 4 seconds.
+171 tests, about 6 seconds.
 
 For the dashboard:
 
@@ -412,12 +441,17 @@ the server, and a warning is logged at startup.
 
 ### What it costs
 
-Roughly $3 to $15 a month. One `shared-cpu-1x` 512MB machine is $3.32, and Neon
-and Upstash have free tiers that a small setup fits inside.
+Roughly $7 to $20 a month. A `shared-cpu-1x` 512MB machine is $3.32 and the
+deployment runs two of them, so about $6.64 of compute. Neon and Upstash have
+free tiers that a small setup fits inside.
 
-`fly.toml` sets `min_machines_running = 0`, so the machine suspends when nobody
-is using it. That's most of the saving. The trade-off is that the first request
-after a quiet spell waits for the machine to wake up.
+`fly launch` creates two machines by default, which is worth keeping: one can
+serve while the other is restarting or unhealthy. Drop to one with
+`fly scale count 1` if you'd rather halve the bill.
+
+`fly.toml` sets `min_machines_running = 0`, so both suspend when nobody is using
+them. That's most of the saving. The trade-off is that the first request after a
+quiet spell waits for a machine to wake up.
 
 Avoid Fly's own Managed Postgres for this. Its cheapest plan is $38 a month,
 which is more than everything else combined.

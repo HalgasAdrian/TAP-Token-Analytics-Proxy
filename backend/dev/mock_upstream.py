@@ -8,7 +8,7 @@ package or the production image.
 
 Testing hooks: a model prefixed `fail-` returns 500, one prefixed `slow-` adds
 latency, one prefixed `cached-` reports half its prompt as a prompt-cache hit,
-and `stream: true` emits SSE ending with a usage chunk.
+and `stream: true` emits SSE.
 """
 
 from __future__ import annotations
@@ -98,8 +98,10 @@ async def chat_completions(request: Request) -> object:
     created = int(time.time())
 
     if payload.get("stream"):
+        options = payload.get("stream_options")
+        include_usage = isinstance(options, dict) and bool(options.get("include_usage"))
         return StreamingResponse(
-            _stream_chunks(completion_id, created, model, prompt_tokens),
+            _stream_chunks(completion_id, created, model, prompt_tokens, include_usage),
             media_type="text/event-stream",
         )
 
@@ -121,9 +123,18 @@ async def chat_completions(request: Request) -> object:
 
 
 async def _stream_chunks(
-    completion_id: str, created: int, model: str, prompt_tokens: int
+    completion_id: str,
+    created: int,
+    model: str,
+    prompt_tokens: int,
+    include_usage: bool,
 ) -> AsyncIterator[str]:
-    """Emit an OpenAI-shaped SSE stream with usage last."""
+    """Emit an OpenAI-shaped SSE stream, with usage last only when asked.
+
+    Real OpenAI withholds the usage chunk unless the request sets
+    stream_options.include_usage, so the mock does too. A mock that always
+    reported usage would hide the case where TAP records nothing.
+    """
 
     def envelope(delta: dict, finish_reason: str | None = None) -> str:
         chunk = {
@@ -145,15 +156,17 @@ async def _stream_chunks(
 
     yield envelope({}, finish_reason="stop")
 
-    usage_chunk = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [],
-        "usage": _usage(model, prompt_tokens, _estimate_tokens(_REPLY)),
-    }
-    yield f"data: {json.dumps(usage_chunk)}\n\n"
+    if include_usage:
+        usage_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [],
+            "usage": _usage(model, prompt_tokens, _estimate_tokens(_REPLY)),
+        }
+        yield f"data: {json.dumps(usage_chunk)}\n\n"
+
     yield "data: [DONE]\n\n"
 
 

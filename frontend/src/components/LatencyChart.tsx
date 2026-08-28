@@ -14,9 +14,6 @@ import { useLatency } from "../hooks/useLatency";
 import { AXIS_TICK, VIZ, formatBucket, formatMs } from "../viz/tokens";
 import { MetricCard, PlotArea } from "./MetricCard";
 
-// The only chart with two series, and so the only one using categorical color.
-// Both share one millisecond axis.
-
 /** Labels the final point of a line, so identity is not carried by color alone. */
 function endLabel(text: string, lastIndex: number) {
   // Recharts types a label renderer as always returning an element, hence the

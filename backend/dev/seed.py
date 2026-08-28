@@ -62,11 +62,8 @@ def _error_status() -> int:
 
 
 def _latency_ms(cache_hit: bool) -> float:
-    """A right-skewed latency, so percentiles differ meaningfully.
-
-    lognormvariate gives the long tail real LLM calls have; a uniform draw
-    would make p50 and p95 nearly identical and the chart pointless.
-    """
+    """lognormvariate gives the long tail real LLM calls have; a uniform draw
+    would make p50 and p95 nearly identical and the chart pointless."""
     if cache_hit:
         return round(random.uniform(0.6, 4.0), 2)
     return round(random.lognormvariate(6.4, 0.55), 2)
@@ -112,8 +109,8 @@ def _make_row(created_at: datetime) -> RequestLog:
     output_tokens = random.randint(40, 800)
     latency = _latency_ms(cache_hit)
 
-    # A quarter of successful calls are streamed, so ttft_ms is populated for
-    # some rows and null for others — as in real traffic.
+    # Populates ttft_ms on some rows and leaves it null on others, as in real
+    # traffic.
     streamed = not cache_hit and random.random() < 0.25
 
     cached_input_tokens = (
@@ -153,7 +150,6 @@ async def seed(hours: int, requests: int, truncate: bool) -> None:
     now = datetime.now(UTC)
     window_start = now - timedelta(hours=hours)
 
-    # Distribute timestamps across the window, weighted by hour of day.
     weights = []
     for offset in range(hours):
         stamp = window_start + timedelta(hours=offset)

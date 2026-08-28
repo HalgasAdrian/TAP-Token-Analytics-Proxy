@@ -9,7 +9,8 @@ export interface CacheBucket {
   hit_rate: number;
 }
 
-// Window total plus series, so the headline figure and the trend always agree.
+// Window total and series come from one query, so the headline figure and the
+// trend cannot disagree.
 export interface CacheSummary {
   total: number;
   hits: number;

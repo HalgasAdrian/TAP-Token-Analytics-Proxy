@@ -18,10 +18,9 @@ async def check_rate_limit(
 ) -> bool:
     """Consume one unit of `scope`'s budget; return False once it is exhausted.
 
-    The window id is part of the key, so each window starts from a fresh counter
-    and old counters expire on their own. A fixed window admits up to 2x`limit`
-    across a boundary; a sliding window would remove that at the cost of storing
-    one member per request, which per-minute quotas do not justify.
+    A fixed window admits up to 2x`limit` across a boundary. A sliding window
+    would remove that at the cost of storing one member per request, which
+    per-minute quotas do not justify.
 
     `scope` is the API key id, or None for unauthenticated traffic, which shares
     a single bucket.

@@ -1,7 +1,7 @@
 """Deleting old request_logs rows.
 
-The table grows forever otherwise, and the stored bodies are most of its size.
-Run `python -m app.cli prune-logs` on a schedule.
+The table grows forever otherwise. Run `python -m app.cli prune-logs` on a
+schedule.
 """
 
 from __future__ import annotations

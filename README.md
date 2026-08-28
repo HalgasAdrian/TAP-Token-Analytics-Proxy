@@ -33,8 +33,10 @@ things at the same time:
 
 ![How a request flows through TAP](architecture.svg)
 
-1. **Check the API key.** If auth is on, look up the caller's TAP key in the
-   database. Unknown key gets a 401 and nothing else happens.
+1. **Check the API key.** If auth is on, look up the caller's TAP key — sent in
+   `X-TAP-Key` — in the database. Unknown key gets a 401 and nothing else
+   happens. The caller's OpenAI key rides separately in `Authorization` and is
+   passed through untouched.
 2. **Check the rate limit.** Count this request against the key's budget in
    Redis. Over budget gets a 429.
 3. **Check the cache.** Turn the request body into a hash, and look for that
@@ -95,6 +97,7 @@ Three tables.
 | `endpoint` | Which path was called, e.g. `/v1/chat/completions`. |
 | `status_code` | What OpenAI returned. |
 | `input_tokens`, `output_tokens` | Token counts, or NULL if OpenAI didn't report any. |
+| `cached_input_tokens` | The part of `input_tokens` OpenAI served from its own prompt cache, billed at a discount. |
 | `cost_usd` | Tokens multiplied by that model's price. |
 | `latency_ms` | How long the whole call took. |
 | `ttft_ms` | For streamed calls, how long until the first word arrived. NULL otherwise. |
@@ -130,8 +133,8 @@ dashboard that reads them.
 
 It's also deployable. Alembic owns the database schema, the dashboard and
 metrics sit behind a password, the production Docker image runs as a normal user
-with no test tools in it, and one Fly machine serves both the API and the
-dashboard against hosted Postgres and Redis. Every push runs the linter, 139
+with no test tools in it, and two Fly machines serve both the API and the
+dashboard against hosted Postgres and Redis. Every push runs the linter, 171
 tests, and both Docker builds.
 
 ## Known limitations
@@ -149,11 +152,12 @@ Worth knowing before you rely on any of this:
 - **The rate limiter allows requests through if Redis is down.** Staying up is
   treated as more important than enforcing the limit. If you'd rather block, see
   the comment in `check_rate_limit`.
-- **Only three models have prices.** `gpt-4o`, `gpt-4o-mini`, and
-  `gpt-3.5-turbo`, in `cost.py`. Anything else records a cost of 0. Add prices
-  there as you need them.
-- **One machine, scaled to zero.** Cheap, but there's no backup machine and the
-  first request after an idle period is slow while the machine wakes up.
+- **Prices are a hardcoded table.** `cost.py` covers the current OpenAI range,
+  but a model that isn't in the table records a cost of 0 and logs a warning.
+  New models need adding by hand.
+- **Two machines, both scaled to zero.** Cheap, and one can cover while the
+  other is down, but both suspend when idle, so the first request after a quiet
+  period is slow while a machine wakes up.
 
 ## Ideas for later
 

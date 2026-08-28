@@ -7,8 +7,10 @@ responses proves the second was served from cache rather than forwarded.
 import pytest
 from sqlalchemy import func, select
 
+from app.auth import TAP_KEY_HEADER
 from app.config import settings
 from app.models import RequestLog
+from app.proxy import _filter_headers
 
 PAYLOAD = {
     "model": "gpt-4o-mini",
@@ -105,7 +107,7 @@ async def test_auth_rejects_an_unknown_key(client):
     settings.auth_enabled = True
 
     response = await client.post(
-        "/v1/chat/completions", json=PAYLOAD, headers={"Authorization": "Bearer nope"}
+        "/v1/chat/completions", json=PAYLOAD, headers={TAP_KEY_HEADER: "nope"}
     )
 
     assert response.status_code == 401
@@ -118,11 +120,39 @@ async def test_a_valid_key_is_admitted_and_attributed(client, session, issue_key
     response = await client.post(
         "/v1/chat/completions",
         json=PAYLOAD,
-        headers={"Authorization": f"Bearer {plaintext}"},
+        headers={TAP_KEY_HEADER: plaintext, **AUTH},
     )
 
     assert response.status_code == 200
     assert (await logged_rows(session))[0].project_id == project.id
+
+
+def test_the_tap_key_is_never_forwarded_upstream():
+    forwarded = _filter_headers(
+        {TAP_KEY_HEADER: "tap-key", "Authorization": "Bearer sk-provider"}
+    )
+
+    assert TAP_KEY_HEADER.lower() not in {name.lower() for name in forwarded}
+    assert forwarded["Authorization"] == "Bearer sk-provider"
+
+
+def test_proxy_and_platform_headers_are_not_relayed():
+    """Fly stamps these on every inbound request; OpenAI rejects the key when
+    they arrive alongside it."""
+    forwarded = _filter_headers(
+        {
+            "Authorization": "Bearer sk-provider",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive",
+            "Via": "1.1 fly.io",
+            "X-Forwarded-For": "203.0.113.7",
+            "X-Forwarded-Proto": "https",
+            "Fly-Request-Id": "abc123",
+            "Fly-Client-IP": "203.0.113.7",
+        }
+    )
+
+    assert set(forwarded) == {"Authorization", "Content-Type"}
 
 
 # --- rate limiting ----------------------------------------------------------
@@ -138,7 +168,7 @@ async def test_the_budget_is_enforced_per_key(client, session, issue_key):
             await client.post(
                 "/v1/chat/completions",
                 json=PAYLOAD,
-                headers={"Authorization": f"Bearer {first}"},
+                headers={TAP_KEY_HEADER: first},
             )
         ).status_code
         for _ in range(3)
@@ -149,7 +179,7 @@ async def test_the_budget_is_enforced_per_key(client, session, issue_key):
     other = await client.post(
         "/v1/chat/completions",
         json=PAYLOAD,
-        headers={"Authorization": f"Bearer {second}"},
+        headers={TAP_KEY_HEADER: second},
     )
     assert other.status_code == 200
 
@@ -159,7 +189,7 @@ async def test_a_rejected_request_is_not_forwarded_or_recorded(
 ):
     settings.auth_enabled = True
     plaintext, _ = await issue_key(rate_limit=1)
-    headers = {"Authorization": f"Bearer {plaintext}"}
+    headers = {TAP_KEY_HEADER: plaintext}
 
     await client.post("/v1/chat/completions", json=PAYLOAD, headers=headers)
     rejected = await client.post("/v1/chat/completions", json=PAYLOAD, headers=headers)
@@ -244,6 +274,34 @@ async def test_streaming_records_ttft_and_usage(client, session):
     assert row.input_tokens > 0
     assert row.output_tokens > 0
     assert row.cost_usd > 0
+
+
+async def test_usage_is_recorded_even_when_the_caller_never_asked_for_it(
+    client, session
+):
+    """The provider withholds usage on a stream unless the request opts in, so
+    TAP opts in on the caller's behalf."""
+    await client.post(
+        "/v1/chat/completions", json={**PAYLOAD, "stream": True}, headers=AUTH
+    )
+
+    row = (await logged_rows(session))[0]
+    assert row.request_body["stream_options"] == {"include_usage": True}
+    assert row.input_tokens > 0
+    assert row.cost_usd > 0
+
+
+async def test_a_caller_s_own_stream_options_are_kept(client, session):
+    await client.post(
+        "/v1/chat/completions",
+        json={**PAYLOAD, "stream": True, "stream_options": {"something_else": 1}},
+        headers=AUTH,
+    )
+
+    assert (await logged_rows(session))[0].request_body["stream_options"] == {
+        "something_else": 1,
+        "include_usage": True,
+    }
 
 
 async def test_a_streamed_request_bypasses_the_cache(client):
