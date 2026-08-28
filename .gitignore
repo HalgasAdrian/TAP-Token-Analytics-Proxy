@@ -45,5 +45,6 @@ redis-data/
 Thumbs.db
 .idea/
 .vscode/
+.claude/settings.local.json
 *.swp
 *~
